@@ -1,6 +1,8 @@
 agregore-ipfs-daemon
 example-folder
 dist/
+.ipfs
+agregore-ipfs-repo
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,linux,macos,windows
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,visualstudiocode,linux,macos,windows
