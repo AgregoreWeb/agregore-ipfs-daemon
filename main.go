@@ -56,10 +56,19 @@ func setupConfig(cfg *config.Config) {
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md
 
 	// Enable pubsub for better IPNS
-	cfg.Pubsub.Enabled = config.True
+	cfg.Ipns.UsePubsub = config.True
 	// Disable API and gateway to prevent malicious apps from using
 	cfg.Addresses.API = []string{}
 	cfg.Addresses.Gateway = []string{}
+	// Reduce number of peer connections to reduce resource usage
+	// TODO: needs tuning
+	cfg.Swarm.ConnMgr.LowWater = 100
+	cfg.Swarm.ConnMgr.HighWater = 200
+	// Enable NAT workarounds
+	cfg.Swarm.RelayClient.Enabled = config.True
+	cfg.Swarm.EnableHolePunching = config.True
+	// Limit repo size
+	cfg.Datastore.StorageMax = "1GiB"
 }
 
 func createRepo(path string) error {
