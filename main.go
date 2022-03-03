@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AgregoreWeb/agregore-ipfs-daemon/api"
 	config "github.com/ipfs/go-ipfs-config"
 	files "github.com/ipfs/go-ipfs-files"
 	corerepo "github.com/ipfs/go-ipfs/core/corerepo"
@@ -32,6 +34,7 @@ import (
 )
 
 const ipfsRepoPath = "agregore-ipfs-repo"
+const serverAddr = "127.0.0.1:8123"
 
 // Error channels that need to be tracked
 var errChs = make([]<-chan error, 0)
@@ -255,6 +258,21 @@ func main() {
 
 	log.Println("IPFS node is running")
 
+	apiHandler := api.NewServer()
+
+	s := &http.Server{
+		Addr:         serverAddr,
+		Handler:      apiHandler,
+		ReadTimeout:  time.Second * 10,
+		WriteTimeout: time.Second * 10, // TODO: no timeout because of long IPFS requests?
+	}
+	apiErrC := make(chan error)
+	errChs = append(errChs, apiErrC) // Add server error to global error tracking
+	go func() {
+		apiErrC <- s.ListenAndServe()
+	}()
+	log.Printf("HTTP API listening on http://%s", s.Addr)
+
 	// Wait for server error or process signals like Ctrl-C
 	errc := merge(errChs...)
 	sigs := make(chan os.Signal, 1)
@@ -266,9 +284,20 @@ func main() {
 		log.Printf("terminating due to signal: %v", sig)
 	}
 
+	// There was an error, shut things down
+
 	log.Println("starting shutdown...")
 	cancel()
-	time.Sleep(5 * time.Second) // Let any background processes finish up
+
+	// Gracefully shut down HTTP server with 5 second timeout
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel2()
+	if err := s.Shutdown(ctx2); err != nil {
+		log.Printf("shutting down HTTP server with timeout: %v", err)
+	}
+
+	// Let any background processes finish up
+	time.Sleep(5 * time.Second)
 	log.Println("stopped")
 }
 
