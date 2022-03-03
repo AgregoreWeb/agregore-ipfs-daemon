@@ -31,6 +31,8 @@ import (
 	"github.com/ipfs/go-ipfs/plugin/loader" // This package is needed so that all the preloaded plugins are loaded automatically
 	"github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/libp2p/go-libp2p-core/peer"
+
+	_ "github.com/mtibben/androiddnsfix"
 )
 
 const ipfsRepoPath = "agregore-ipfs-repo"

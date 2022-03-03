@@ -8,6 +8,7 @@ require (
 	github.com/ipfs/go-ipfs-files v0.0.9
 	github.com/ipfs/interface-go-ipfs-core v0.5.2
 	github.com/libp2p/go-libp2p-core v0.11.0
+	github.com/mtibben/androiddnsfix v0.0.0-20200907095054-ff0280446354
 	github.com/multiformats/go-multiaddr v0.4.1
 )
 
