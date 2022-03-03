@@ -9,11 +9,15 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
+	"time"
 
 	config "github.com/ipfs/go-ipfs-config"
 	files "github.com/ipfs/go-ipfs-files"
+	corerepo "github.com/ipfs/go-ipfs/core/corerepo"
 	icore "github.com/ipfs/interface-go-ipfs-core"
 
 	// icorepath "github.com/ipfs/interface-go-ipfs-core/path"
@@ -28,6 +32,9 @@ import (
 )
 
 const ipfsRepoPath = "agregore-ipfs-repo"
+
+// Error channels that need to be tracked
+var errChs = make([]<-chan error, 0)
 
 /// ------ Setting up the IPFS Repo
 
@@ -129,6 +136,15 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, error) {
 		return nil, err
 	}
 
+	// Set up GC
+	// Same thing as --enable-gc
+	errc := make(chan error)
+	go func() {
+		errc <- corerepo.PeriodicGC(ctx, node)
+		close(errc)
+	}()
+	errChs = append(errChs, errc) // Keep track of this channel globally
+
 	// Attach the Core API to the constructed node
 	return coreapi.NewCoreAPI(node)
 }
@@ -226,19 +242,63 @@ func getUnixfsNode(path string) (files.Node, error) {
 /// -------
 
 func main() {
-	// Getting a IPFS node running
+	log.Println("started")
 
+	// Shared context for all IPFS node stuff
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	ipfs, err := spawnNode(ctx)
 	if err != nil {
 		log.Fatalf("failed to spawn node: %s", err)
 	}
+	_ = ipfs
 
 	log.Println("IPFS node is running")
 
-	// Let node just run
-	_ = ipfs
-	select {}
+	// Wait for server error or process signals like Ctrl-C
+	errc := merge(errChs...)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	select {
+	case err := <-errc:
+		log.Printf("fatal error: %v", err)
+	case sig := <-sigs:
+		log.Printf("terminating due to signal: %v", sig)
+	}
+
+	log.Println("starting shutdown...")
+	cancel()
+	time.Sleep(5 * time.Second) // Let any background processes finish up
+	log.Println("stopped")
+}
+
+// merge does fan-in of multiple read-only error channels
+// taken from http://blog.golang.org/pipelines
+// taken from https://github.com/ipfs/go-ipfs/blob/d5ad847e05865e81957c43f526600860c06dbb84/cmd/ipfs/daemon.go#L875
+func merge(cs ...<-chan error) <-chan error {
+	var wg sync.WaitGroup
+	out := make(chan error)
+
+	// Start an output goroutine for each input channel in cs.  output
+	// copies values from c to out until c is closed, then calls wg.Done.
+	output := func(c <-chan error) {
+		for n := range c {
+			out <- n
+		}
+		wg.Done()
+	}
+	for _, c := range cs {
+		if c != nil {
+			wg.Add(1)
+			go output(c)
+		}
+	}
+
+	// Start a goroutine to close out once all the output goroutines are
+	// done.  This must start after the wg.Add call.
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out
 }
