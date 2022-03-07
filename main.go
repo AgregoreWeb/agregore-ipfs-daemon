@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/AgregoreWeb/agregore-ipfs-daemon/api"
 	config "github.com/ipfs/go-ipfs-config"
 	files "github.com/ipfs/go-ipfs-files"
+	corehttp "github.com/ipfs/go-ipfs/core/corehttp"
 	corerepo "github.com/ipfs/go-ipfs/core/corerepo"
 	icore "github.com/ipfs/interface-go-ipfs-core"
 
@@ -36,7 +35,6 @@ import (
 )
 
 const ipfsRepoPath = "agregore-ipfs-repo"
-const serverAddr = "127.0.0.1:8123"
 
 // Error channels that need to be tracked
 var errChs = make([]<-chan error, 0)
@@ -64,14 +62,21 @@ func setupPlugins(externalPluginsPath string) error {
 
 // setupConfig applies custom settings to an IPFS config
 func setupConfig(cfg *config.Config) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("couldn't get working directory: %v", err)
+	}
+
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/config.md
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md
 
 	// Enable pubsub for better IPNS
 	cfg.Ipns.UsePubsub = config.True
-	// Disable API and gateway to prevent malicious apps from using
+	// Disable API to prevent malicious apps from using
 	cfg.Addresses.API = []string{}
-	cfg.Addresses.Gateway = []string{}
+	// Run gateway on Unix socket
+	cfg.Addresses.Gateway = []string{filepath.Join("/unix/", wd, "gateway.sock")}
+	cfg.Gateway.Writable = true
 	// Reduce number of peer connections to reduce resource usage
 	// TODO: needs tuning
 	cfg.Swarm.ConnMgr.LowWater = 100
@@ -110,22 +115,22 @@ func createRepo(path string) error {
 /// ------ Spawning the node
 
 // Creates an IPFS node and returns its coreAPI
-func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, error) {
+func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.IpfsNode, error) {
 	// Open the repo
 	repo, err := fsrepo.Open(repoPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Apply custom config, in case this repo was created with an old config
 	cfg, err := repo.Config()
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve repo config: %w", err)
+		return nil, nil, fmt.Errorf("failed to retrieve repo config: %w", err)
 	}
 	setupConfig(cfg)
 	err = repo.SetConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set repo config: %w", err)
+		return nil, nil, fmt.Errorf("failed to set repo config: %w", err)
 	}
 
 	// Construct the node
@@ -138,7 +143,7 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, error) {
 
 	node, err := core.NewNode(ctx, nodeOptions)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Set up GC
@@ -151,13 +156,17 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, error) {
 	errChs = append(errChs, errc) // Keep track of this channel globally
 
 	// Attach the Core API to the constructed node
-	return coreapi.NewCoreAPI(node)
+	api, err := coreapi.NewCoreAPI(node)
+	if err != nil {
+		return nil, nil, err
+	}
+	return api, node, nil
 }
 
 // Spawns a node on the default repo location, creating it if it doesn't exist
-func spawnNode(ctx context.Context) (icore.CoreAPI, error) {
+func spawnNode(ctx context.Context) (icore.CoreAPI, *core.IpfsNode, error) {
 	if err := setupPlugins(ipfsRepoPath); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Create repo if needed
@@ -165,11 +174,11 @@ func spawnNode(ctx context.Context) (icore.CoreAPI, error) {
 		if os.IsNotExist(err) {
 			err := createRepo(ipfsRepoPath)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		} else {
 			// Other error: permissions, etc
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -252,7 +261,7 @@ func main() {
 	// Shared context for all IPFS node stuff
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ipfs, err := spawnNode(ctx)
+	ipfs, node, err := spawnNode(ctx)
 	if err != nil {
 		log.Fatalf("failed to spawn node: %s", err)
 	}
@@ -260,20 +269,20 @@ func main() {
 
 	log.Println("IPFS node is running")
 
-	apiHandler := api.NewServer()
+	// Start gateway
 
-	s := &http.Server{
-		Addr:         serverAddr,
-		Handler:      apiHandler,
-		ReadTimeout:  time.Second * 10,
-		WriteTimeout: time.Second * 10, // TODO: no timeout because of long IPFS requests?
+	opts := []corehttp.ServeOption{
+		corehttp.GatewayOption(true, "/ipfs", "/ipns"),
 	}
-	apiErrC := make(chan error)
-	errChs = append(errChs, apiErrC) // Add server error to global error tracking
+	gatewayAddr, _ := node.Repo.GetConfigKey("Addresses.Gateway")
+	gatewayErrC := make(chan error)
+	errChs = append(errChs, gatewayErrC) // Add server error to global error tracking
 	go func() {
-		apiErrC <- s.ListenAndServe()
+		gatewayErrC <- corehttp.ListenAndServe(node, gatewayAddr.(string), opts...)
 	}()
-	log.Printf("HTTP API listening on http://%s", s.Addr)
+	log.Printf("Gateway listening on %s", gatewayAddr.(string))
+
+	exitCode := 0
 
 	// Wait for server error or process signals like Ctrl-C
 	errc := merge(errChs...)
@@ -282,8 +291,10 @@ func main() {
 	select {
 	case err := <-errc:
 		log.Printf("fatal error: %v", err)
+		exitCode = 1
 	case sig := <-sigs:
 		log.Printf("terminating due to signal: %v", sig)
+		exitCode = 1
 	}
 
 	// There was an error, shut things down
@@ -291,19 +302,13 @@ func main() {
 	log.Println("starting shutdown...")
 	cancel()
 
-	started := time.Now()
-
-	// Gracefully shut down HTTP server with 5 second timeout
-	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel2()
-	if err := s.Shutdown(ctx2); err != nil {
-		log.Printf("shutting down HTTP server with timeout: %v", err)
-	}
-
 	// Let any background processes finish up
-	// They have 5 seconds from when cancel() was called
-	time.Sleep(5*time.Second - time.Since(started))
+	time.Sleep(5 * time.Second)
 	log.Println("stopped")
+
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
 }
 
 // merge does fan-in of multiple read-only error channels
