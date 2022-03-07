@@ -303,7 +303,7 @@ func main() {
 	cancel()
 
 	// Let any background processes finish up
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 	log.Println("stopped")
 
 	if exitCode != 0 {
