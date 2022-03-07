@@ -3,7 +3,7 @@
 **Work in progress**
 
 
-The [corehttp](./corehttp/) directory is forked from [here](https://github.com/ipfs/go-ipfs/tree/v0.12.0/core/corehttp).
+The [go-ipfs](./go-ipfs/) directory is forked from [go-ipfs v0.12.0](https://github.com/ipfs/go-ipfs/tree/v0.12.0), but the important part are the changes in [gateway_handler.go](./go-ipfs/core/corehttp/gateway_handler.go).
 
 ## License
 

@@ -2,6 +2,7 @@ package corehttp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -300,11 +301,17 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 
 	// we need to figure out whether this is a directory before doing most of the heavy lifting below
 	_, ok := dr.(files.Directory)
+	// Also if it's a JSON or HTML directory listing
+	jsonListing := r.Header.Get("Accept") == "application/json"
 
-	if ok && assets.BindataVersionHash != "" {
-		responseEtag = `"DirIndex-` + assets.BindataVersionHash + `_CID-` + resolvedPath.Cid().String() + `"`
-	} else {
-		responseEtag = `"` + resolvedPath.Cid().String() + `"`
+	if ok {
+		if jsonListing {
+			responseEtag = `"DirIndex-json_CID-` + resolvedPath.Cid().String() + `"`
+		} else if assets.BindataVersionHash != "" {
+			responseEtag = `"DirIndex-` + assets.BindataVersionHash + `_CID-` + resolvedPath.Cid().String() + `"`
+		} else {
+			responseEtag = `"` + resolvedPath.Cid().String() + `"`
+		}
 	}
 
 	// Check etag sent back to us
@@ -392,6 +399,38 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 	// superfluous response.WriteHeader call from prometheus/client_golang
 	if w.Header().Get("Location") != "" {
 		w.WriteHeader(http.StatusMovedPermanently)
+		return
+	}
+
+	if jsonListing {
+		// Directory listing should be returned as a JSON array
+		// Directories end with a slash
+
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodHead {
+			return
+		}
+
+		listing := make([]string, 0)
+		dirit := dir.Entries()
+		for dirit.Next() {
+			name := dirit.Name()
+			if _, ok := dirit.Node().(files.Directory); ok {
+				name += "/"
+			}
+			listing = append(listing, name)
+		}
+		if dirit.Err() != nil {
+			internalWebError(w, dirit.Err())
+			return
+		}
+
+		jsonBytes, err := json.Marshal(&listing)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		w.Write(jsonBytes)
 		return
 	}
 
