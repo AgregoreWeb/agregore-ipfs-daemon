@@ -291,6 +291,8 @@ func main() {
 	log.Println("starting shutdown...")
 	cancel()
 
+	started := time.Now()
+
 	// Gracefully shut down HTTP server with 5 second timeout
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel2()
@@ -299,7 +301,8 @@ func main() {
 	}
 
 	// Let any background processes finish up
-	time.Sleep(5 * time.Second)
+	// They have 5 seconds from when cancel() was called
+	time.Sleep(5*time.Second - time.Since(started))
 	log.Println("stopped")
 }
 
