@@ -22,6 +22,7 @@ import (
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	assets "github.com/ipfs/go-ipfs/assets"
+	ipld "github.com/ipfs/go-ipld-format"
 	dag "github.com/ipfs/go-merkledag"
 	mfs "github.com/ipfs/go-mfs"
 	path "github.com/ipfs/go-path"
@@ -620,6 +621,100 @@ func (i *gatewayHandler) servePretty404IfPresent(w http.ResponseWriter, r *http.
 	return err == nil
 }
 
+// addFileToTree adds a file to an existing directory hash. It returns false if
+// an error was sent to the user. Call finalizeDir after all files are added,
+// to make sure they've been added succesfully.
+//
+// pbnd is the root node in ProtoBuf format.
+func (i *gatewayHandler) addFileToDir(
+	w http.ResponseWriter, r *http.Request,
+	rootCid cid.Cid, path string, file io.ReadCloser,
+) (*mfs.Root, bool) {
+
+	ctx := r.Context()
+	ds := i.api.Dag()
+
+	// Resolve the old root.
+
+	rnode, err := ds.Get(ctx, rootCid)
+	if err != nil {
+		webError(w, "WritableGateway: Could not create DAG from request", err, http.StatusInternalServerError)
+		return nil, false
+	}
+
+	pbnd, ok := rnode.(*dag.ProtoNode)
+	if !ok {
+		webError(w, "Cannot read non protobuf nodes through gateway", dag.ErrNotProtobuf, http.StatusBadRequest)
+		return nil, false
+	}
+
+	// Create the new file.
+	newFilePath, err := i.api.Unixfs().Add(ctx, files.NewReaderFile(r.Body))
+	if err != nil {
+		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
+		return nil, false
+	}
+
+	newFile, err := ds.Get(ctx, newFilePath.Cid())
+	if err != nil {
+		webError(w, "WritableGateway: failed to resolve new file", err, http.StatusInternalServerError)
+		return nil, false
+	}
+
+	// Patch the new file into the old root.
+
+	root, err := mfs.NewRoot(ctx, ds, pbnd, nil)
+	if err != nil {
+		webError(w, "WritableGateway: failed to create MFS root", err, http.StatusBadRequest)
+		return nil, false
+	}
+
+	newDirectory, newFileName := gopath.Split(path)
+
+	if newDirectory != "" {
+		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
+		if err != nil {
+			webError(w, "WritableGateway: failed to create MFS directory", err, http.StatusInternalServerError)
+			return nil, false
+		}
+	}
+	dirNode, err := mfs.Lookup(root, newDirectory)
+	if err != nil {
+		webError(w, "WritableGateway: failed to lookup directory", err, http.StatusInternalServerError)
+		return nil, false
+	}
+	dir, ok := dirNode.(*mfs.Directory)
+	if !ok {
+		http.Error(w, "WritableGateway: target directory is not a directory", http.StatusBadRequest)
+		return nil, false
+	}
+	err = dir.Unlink(newFileName)
+	switch err {
+	case os.ErrNotExist, nil:
+	default:
+		webError(w, "WritableGateway: failed to replace existing file", err, http.StatusBadRequest)
+		return nil, false
+	}
+	err = dir.AddChild(newFileName, newFile)
+	if err != nil {
+		webError(w, "WritableGateway: failed to link file into directory", err, http.StatusInternalServerError)
+		return nil, false
+	}
+
+	return root, true
+}
+
+// finalizeDir finalizes that the provided root directory, confirming that all files
+// were added successfully. It returns false if an error was sent to the user.
+func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (ipld.Node, bool) {
+	node, err := root.GetDirectory().GetNode()
+	if err != nil {
+		webError(w, "WritableGateway: failed to finalize", err, http.StatusInternalServerError)
+		return nil, false
+	}
+	return node, true
+}
+
 func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
 	p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
 	if err != nil {
@@ -633,9 +728,6 @@ func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	ds := i.api.Dag()
-
 	// Parse the path
 	rootCid, newPath, err := parseIpfsPath(r.URL.Path)
 	if err != nil {
@@ -646,75 +738,14 @@ func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
 		return
 	}
-	newDirectory, newFileName := gopath.Split(newPath)
 
-	// Resolve the old root.
-
-	rnode, err := ds.Get(ctx, rootCid)
-	if err != nil {
-		webError(w, "WritableGateway: Could not create DAG from request", err, http.StatusInternalServerError)
-		return
-	}
-
-	pbnd, ok := rnode.(*dag.ProtoNode)
+	root, ok := i.addFileToDir(w, r, rootCid, newPath, r.Body)
 	if !ok {
-		webError(w, "Cannot read non protobuf nodes through gateway", dag.ErrNotProtobuf, http.StatusBadRequest)
+		// Sending error to client is handled in the func
 		return
 	}
-
-	// Create the new file.
-	newFilePath, err := i.api.Unixfs().Add(ctx, files.NewReaderFile(r.Body))
-	if err != nil {
-		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
-		return
-	}
-
-	newFile, err := ds.Get(ctx, newFilePath.Cid())
-	if err != nil {
-		webError(w, "WritableGateway: failed to resolve new file", err, http.StatusInternalServerError)
-		return
-	}
-
-	// Patch the new file into the old root.
-
-	root, err := mfs.NewRoot(ctx, ds, pbnd, nil)
-	if err != nil {
-		webError(w, "WritableGateway: failed to create MFS root", err, http.StatusBadRequest)
-		return
-	}
-
-	if newDirectory != "" {
-		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
-		if err != nil {
-			webError(w, "WritableGateway: failed to create MFS directory", err, http.StatusInternalServerError)
-			return
-		}
-	}
-	dirNode, err := mfs.Lookup(root, newDirectory)
-	if err != nil {
-		webError(w, "WritableGateway: failed to lookup directory", err, http.StatusInternalServerError)
-		return
-	}
-	dir, ok := dirNode.(*mfs.Directory)
+	nnode, ok := i.finalizeDir(w, root)
 	if !ok {
-		http.Error(w, "WritableGateway: target directory is not a directory", http.StatusBadRequest)
-		return
-	}
-	err = dir.Unlink(newFileName)
-	switch err {
-	case os.ErrNotExist, nil:
-	default:
-		webError(w, "WritableGateway: failed to replace existing file", err, http.StatusBadRequest)
-		return
-	}
-	err = dir.AddChild(newFileName, newFile)
-	if err != nil {
-		webError(w, "WritableGateway: failed to link file into directory", err, http.StatusInternalServerError)
-		return
-	}
-	nnode, err := root.GetDirectory().GetNode()
-	if err != nil {
-		webError(w, "WritableGateway: failed to finalize", err, http.StatusInternalServerError)
 		return
 	}
 	newcid := nnode.Cid()
