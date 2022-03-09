@@ -3,10 +3,12 @@ package corehttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,7 +38,11 @@ import (
 const (
 	ipfsPathPrefix = "/ipfs/"
 	ipnsPathPrefix = "/ipns/"
+
+	empyDirCidStr = "QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"
 )
+
+var empyDirCid = cidMustDecode(empyDirCidStr)
 
 var onlyAscii = regexp.MustCompile("[[:^ascii:]]")
 
@@ -310,9 +316,9 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 			responseEtag = `"DirIndex-json_CID-` + resolvedPath.Cid().String() + `"`
 		} else if assets.BindataVersionHash != "" {
 			responseEtag = `"DirIndex-` + assets.BindataVersionHash + `_CID-` + resolvedPath.Cid().String() + `"`
-		} else {
-			responseEtag = `"` + resolvedPath.Cid().String() + `"`
 		}
+	} else {
+		responseEtag = `"` + resolvedPath.Cid().String() + `"`
 	}
 
 	// Check etag sent back to us
@@ -621,16 +627,9 @@ func (i *gatewayHandler) servePretty404IfPresent(w http.ResponseWriter, r *http.
 	return err == nil
 }
 
-// addFileToTree adds a file to an existing directory hash. It returns false if
-// an error was sent to the user. Call finalizeDir after all files are added,
-// to make sure they've been added succesfully.
-//
-// pbnd is the root node in ProtoBuf format.
-func (i *gatewayHandler) addFileToDir(
-	w http.ResponseWriter, r *http.Request,
-	rootCid cid.Cid, path string, file io.ReadCloser,
-) (*mfs.Root, bool) {
-
+// rootFromCid returns an MFS root from the CID of an existing directory.
+// It returns false if an error was sent to the user.
+func (i *gatewayHandler) rootFromCid(w http.ResponseWriter, r *http.Request, rootCid cid.Cid) (*mfs.Root, bool) {
 	ctx := r.Context()
 	ds := i.api.Dag()
 
@@ -648,26 +647,41 @@ func (i *gatewayHandler) addFileToDir(
 		return nil, false
 	}
 
-	// Create the new file.
-	newFilePath, err := i.api.Unixfs().Add(ctx, files.NewReaderFile(r.Body))
-	if err != nil {
-		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
-		return nil, false
-	}
-
-	newFile, err := ds.Get(ctx, newFilePath.Cid())
-	if err != nil {
-		webError(w, "WritableGateway: failed to resolve new file", err, http.StatusInternalServerError)
-		return nil, false
-	}
-
-	// Patch the new file into the old root.
+	// Create root
 
 	root, err := mfs.NewRoot(ctx, ds, pbnd, nil)
 	if err != nil {
 		webError(w, "WritableGateway: failed to create MFS root", err, http.StatusBadRequest)
 		return nil, false
 	}
+	return root, true
+}
+
+// addFileToTree adds a file to an existing MFS root. It returns false if
+// an error was sent to the user. Call finalizeDir after all files are added,
+// to make sure they've been added succesfully.
+func (i *gatewayHandler) addFileToDir(
+	w http.ResponseWriter, r *http.Request,
+	root *mfs.Root, path string, file io.ReadCloser) bool {
+
+	ctx := r.Context()
+	ds := i.api.Dag()
+
+	// Create the new file.
+
+	newFilePath, err := i.api.Unixfs().Add(ctx, files.NewReaderFile(file))
+	if err != nil {
+		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
+		return false
+	}
+
+	newFile, err := ds.Get(ctx, newFilePath.Cid())
+	if err != nil {
+		webError(w, "WritableGateway: failed to resolve new file", err, http.StatusInternalServerError)
+		return false
+	}
+
+	// Patch the file into the root
 
 	newDirectory, newFileName := gopath.Split(path)
 
@@ -675,33 +689,33 @@ func (i *gatewayHandler) addFileToDir(
 		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
 		if err != nil {
 			webError(w, "WritableGateway: failed to create MFS directory", err, http.StatusInternalServerError)
-			return nil, false
+			return false
 		}
 	}
 	dirNode, err := mfs.Lookup(root, newDirectory)
 	if err != nil {
 		webError(w, "WritableGateway: failed to lookup directory", err, http.StatusInternalServerError)
-		return nil, false
+		return false
 	}
 	dir, ok := dirNode.(*mfs.Directory)
 	if !ok {
 		http.Error(w, "WritableGateway: target directory is not a directory", http.StatusBadRequest)
-		return nil, false
+		return false
 	}
 	err = dir.Unlink(newFileName)
 	switch err {
 	case os.ErrNotExist, nil:
 	default:
 		webError(w, "WritableGateway: failed to replace existing file", err, http.StatusBadRequest)
-		return nil, false
+		return false
 	}
 	err = dir.AddChild(newFileName, newFile)
 	if err != nil {
 		webError(w, "WritableGateway: failed to link file into directory", err, http.StatusInternalServerError)
-		return nil, false
+		return false
 	}
 
-	return root, true
+	return true
 }
 
 // finalizeDir finalizes that the provided root directory, confirming that all files
@@ -715,44 +729,131 @@ func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (ipl
 	return node, true
 }
 
+// addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
+// It returns false if an error was sent to the user.
+func (i *gatewayHandler) addFilesFromForm(
+	w http.ResponseWriter, r *http.Request, dir cid.Cid, mpr *multipart.Reader) (cid.Cid, bool) {
+
+	// Get dir
+	root, ok := i.rootFromCid(w, r, dir)
+	if !ok {
+		// Sending error to client is handled in the func
+		return cid.Cid{}, false
+	}
+
+	// Iterate through files
+	for {
+		part, err := mpr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			internalWebError(w, err)
+			return cid.Cid{}, false
+		}
+		// Only files with the key "file" are valid
+		if part.FormName() != "file" {
+			continue
+		}
+
+		if ok := i.addFileToDir(w, r, root, part.FileName(), part); !ok {
+			return cid.Cid{}, false
+		}
+	}
+
+	nnode, ok := i.finalizeDir(w, root)
+	if !ok {
+		return cid.Cid{}, false
+	}
+	return nnode.Cid(), true
+}
+
 func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
-	p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
-	if err != nil {
+	mpr, err := r.MultipartReader()
+	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		// Unexpected error
 		internalWebError(w, err)
 		return
 	}
 
+	var cidStr string
+
+	if mpr == nil {
+		// Add just a single file
+		p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		cidStr = p.Cid().String()
+	} else {
+		// Add multiple files from the form data
+
+		newCid, ok := i.addFilesFromForm(w, r, empyDirCid, mpr)
+		if !ok {
+			// Sending error to client is handled in the func
+			return
+		}
+		cidStr = newCid.String()
+	}
+
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
-	w.Header().Set("IPFS-Hash", p.Cid().String())
-	http.Redirect(w, r, p.String(), http.StatusCreated)
+	w.Header().Set("IPFS-Hash", cidStr)
+	http.Redirect(w, r, "/ipfs/"+cidStr, http.StatusCreated)
 }
 
 func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request) {
+	mpr, err := r.MultipartReader()
+	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		// Unexpected error
+		internalWebError(w, err)
+		return
+	}
+
 	// Parse the path
 	rootCid, newPath, err := parseIpfsPath(r.URL.Path)
 	if err != nil {
 		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
 		return
 	}
-	if newPath == "" || newPath == "/" {
+	if mpr == nil && (newPath == "" || newPath == "/") {
+		// Empty path is allowed when uploading multiple files
 		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
 		return
 	}
 
-	root, ok := i.addFileToDir(w, r, rootCid, newPath, r.Body)
-	if !ok {
-		// Sending error to client is handled in the func
-		return
+	var cidStr string
+
+	if mpr == nil {
+		// Add just a single file to the directory
+
+		root, ok := i.rootFromCid(w, r, rootCid)
+		if !ok {
+			// Sending error to client is handled in the func
+			return
+		}
+		if ok := i.addFileToDir(w, r, root, newPath, r.Body); !ok {
+			return
+		}
+		nnode, ok := i.finalizeDir(w, root)
+		if !ok {
+			return
+		}
+		cidStr = nnode.Cid().String()
+	} else {
+		// Add multiple files from the form data
+
+		newCid, ok := i.addFilesFromForm(w, r, rootCid, mpr)
+		if !ok {
+			// Sending error to client is handled in the func
+			return
+		}
+		cidStr = newCid.String()
 	}
-	nnode, ok := i.finalizeDir(w, root)
-	if !ok {
-		return
-	}
-	newcid := nnode.Cid()
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
-	w.Header().Set("IPFS-Hash", newcid.String())
-	http.Redirect(w, r, gopath.Join(ipfsPathPrefix, newcid.String(), newPath), http.StatusCreated)
+	w.Header().Set("IPFS-Hash", cidStr)
+	http.Redirect(w, r, gopath.Join(ipfsPathPrefix, cidStr, newPath), http.StatusCreated)
 }
 
 func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -935,4 +1036,12 @@ func fixupSuperfluousNamespace(w http.ResponseWriter, urlPath string, urlQuery s
 		SuggestedPath: intendedPath.String(),
 		ErrorMsg:      fmt.Sprintf("invalid path: %q should be %q", urlPath, intendedPath.String()),
 	}) == nil
+}
+
+func cidMustDecode(s string) cid.Cid {
+	c, err := cid.Decode(s)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
