@@ -23,6 +23,7 @@ import (
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	assets "github.com/ipfs/go-ipfs/assets"
 	ipld "github.com/ipfs/go-ipld-format"
 	dag "github.com/ipfs/go-merkledag"
@@ -30,6 +31,7 @@ import (
 	path "github.com/ipfs/go-path"
 	"github.com/ipfs/go-path/resolver"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/ipfs/interface-go-ipfs-core/options"
 	ipath "github.com/ipfs/interface-go-ipfs-core/path"
 	routing "github.com/libp2p/go-libp2p-core/routing"
 	prometheus "github.com/prometheus/client_golang/prometheus"
@@ -69,8 +71,9 @@ type redirectTemplateData struct {
 // gatewayHandler is a HTTP handler that serves IPFS objects (accessible by default at /ipfs/<path>)
 // (it serves requests like GET /ipfs/QmVRzPKPzNtSrEzBFm2UZfxmPAgnaLke4DMcerbsGGSaFe/link)
 type gatewayHandler struct {
-	config GatewayConfig
-	api    coreiface.CoreAPI
+	config   GatewayConfig
+	api      coreiface.CoreAPI
+	keystore keystore.Keystore
 
 	unixfsGetMetric *prometheus.SummaryVec
 }
@@ -94,7 +97,7 @@ func (sw *statusResponseWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
-func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI) *gatewayHandler {
+func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore.Keystore) *gatewayHandler {
 	unixfsGetMetric := prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: "ipfs",
@@ -115,6 +118,7 @@ func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI) *gatewayHandler {
 	i := &gatewayHandler{
 		config:          c,
 		api:             api,
+		keystore:        keystore,
 		unixfsGetMetric: unixfsGetMetric,
 	}
 	return i
@@ -157,7 +161,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if i.config.Writable {
 		switch r.Method {
 		case http.MethodPost:
-			i.postHandler(w, r)
+			if strings.HasPrefix(r.URL.Path, ipnsPathPrefix) {
+				i.ipnsPostHandler(w, r)
+			} else {
+				i.ipfsPostHandler(w, r)
+			}
 			return
 		case http.MethodPut:
 			i.putHandler(w, r)
@@ -772,7 +780,7 @@ func (i *gatewayHandler) addFilesFromForm(
 	return nnode.Cid(), true
 }
 
-func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
+func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request) {
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -930,6 +938,60 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("IPFS-Hash", ncid.String())
 	// note: StatusCreated is technically correct here as we created a new resource.
 	http.Redirect(w, r, gopath.Join(ipfsPathPrefix+ncid.String(), directory), http.StatusCreated)
+}
+
+func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 60)
+
+	rootPath, err := path.ParsePath(r.URL.Path)
+	if err != nil {
+		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
+		return
+	}
+	segs := rootPath.Segments()
+	if len(segs) > 2 {
+		webError(w, "makeworld: IPNS subpaths are not implemented yet", err, http.StatusBadRequest)
+		return
+	}
+
+	// Verify body is a valid CID
+	buf, err := io.ReadAll(r.Body)
+	if err != nil {
+		webError(w, "WritableGateway: body is not a valid CID (too long)", err, http.StatusBadRequest)
+		return
+	}
+	bodyCid, err := cid.Decode(string(buf))
+	if err != nil {
+		webError(w, "WritableGateway: body is not a valid CID", err, http.StatusBadRequest)
+		return
+	}
+
+	keyName := segs[1]
+	has, err := i.keystore.Has(keyName)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	if !has {
+		// Generate key with name
+		_, err = i.api.Key().Generate(r.Context(), keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+	}
+
+	ipnsEntry, err := i.api.Name().Publish(
+		r.Context(), ipath.IpfsPath(bodyCid),
+		options.Name.AllowOffline(true), options.Name.Key(keyName),
+	)
+	if err != nil {
+		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Add("Content-Type", "text/plain")
+	fmt.Fprint(w, ipnsEntry.Name())
 }
 
 func (i *gatewayHandler) addUserHeaders(w http.ResponseWriter) {

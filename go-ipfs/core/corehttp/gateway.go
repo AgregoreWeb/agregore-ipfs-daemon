@@ -91,7 +91,7 @@ func GatewayOption(writable bool, paths ...string) ServeOption {
 			Headers:      headers,
 			Writable:     writable,
 			PathPrefixes: cfg.Gateway.PathPrefixes,
-		}, api)
+		}, api, n.Repo.Keystore())
 
 		for _, p := range paths {
 			mux.Handle(p+"/", gateway)

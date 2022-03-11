@@ -139,6 +139,11 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.Ipfs
 		Online:  true,
 		Routing: libp2p.DHTOption, // Full DHT node (store and fetch)
 		Repo:    repo,
+		// Set PubSub stuff, this was taken from go-ipfs daemon.go
+		ExtraOpts: map[string]bool{
+			"pubsub": true,
+			"ipnsps": true,
+		},
 	}
 
 	node, err := core.NewNode(ctx, nodeOptions)
