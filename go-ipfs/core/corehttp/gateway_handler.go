@@ -400,8 +400,8 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if r.Header.Get("X-Resolve") == "none" {
-			// This header means don't serve index.html
+		if r.URL.Query().Has("noResolve") {
+			// This means don't serve index.html
 			break
 		}
 
