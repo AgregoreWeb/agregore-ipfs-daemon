@@ -25,6 +25,7 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	assets "github.com/ipfs/go-ipfs/assets"
+	ke "github.com/ipfs/go-ipfs/core/commands/keyencode"
 	ipld "github.com/ipfs/go-ipld-format"
 	dag "github.com/ipfs/go-merkledag"
 	mfs "github.com/ipfs/go-mfs"
@@ -33,6 +34,7 @@ import (
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/options"
 	ipath "github.com/ipfs/interface-go-ipfs-core/path"
+	"github.com/libp2p/go-libp2p-core/peer"
 	routing "github.com/libp2p/go-libp2p-core/routing"
 	prometheus "github.com/prometheus/client_golang/prometheus"
 )
@@ -669,7 +671,7 @@ func (i *gatewayHandler) rootFromCid(w http.ResponseWriter, r *http.Request, roo
 	return root, true
 }
 
-// addFileToTree adds a file to an existing MFS root. It returns false if
+// addFileToDir adds a file to an existing MFS root. It returns false if
 // an error was sent to the user. Call finalizeDir after all files are added,
 // to make sure they've been added succesfully.
 func (i *gatewayHandler) addFileToDir(
@@ -724,6 +726,69 @@ func (i *gatewayHandler) addFileToDir(
 	err = dir.AddChild(newFileName, newFile)
 	if err != nil {
 		webError(w, "WritableGateway: failed to link file into directory", err, http.StatusInternalServerError)
+		return false
+	}
+
+	return true
+}
+
+// addIpfsPathToDir adds a file or dir to an existing MFS root, specified using
+// a path like /ipfs/<CID>/a
+//
+// dstPath is the destination path. If it ends with a slash it will be the
+// containing directory for the ipfs path. Parent dirs will be created as needed.
+// If it doesn't end with a slash then it will be the name of the ipfs path.
+//
+// This func returns false if an error was sent to the user. Call finalizeDir after all
+// files are added, to make sure they've been added succesfully.
+func (i *gatewayHandler) addIpfsPathToDir(
+	w http.ResponseWriter, r *http.Request,
+	root *mfs.Root, ipfsPath ipath.Path, dstPath string) bool {
+
+	ctx := r.Context()
+
+	// dstPath can't end with a directory name
+	if dstPath[len(dstPath)-1] == '/' {
+		dstPath += gopath.Base(ipfsPath.String())
+	}
+
+	nd, err := i.api.ResolveNode(ctx, ipfsPath)
+	if err != nil {
+		webError(w, "WritableGateway: failed to resolve node", err, http.StatusInternalServerError)
+		return false
+	}
+
+	newDirectory, newFileName := gopath.Split(dstPath)
+
+	if newDirectory != "/" {
+		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
+		if err != nil {
+			webError(w, "WritableGateway: failed to create MFS directory", err, http.StatusInternalServerError)
+			return false
+		}
+	}
+
+	dirNode, err := mfs.Lookup(root, newDirectory)
+	if err != nil {
+		webError(w, "WritableGateway: failed to lookup directory", err, http.StatusInternalServerError)
+		return false
+	}
+	dir, ok := dirNode.(*mfs.Directory)
+	if !ok {
+		http.Error(w, "WritableGateway: target directory is not a directory", http.StatusBadRequest)
+		return false
+	}
+	err = dir.Unlink(newFileName)
+	switch err {
+	case os.ErrNotExist, nil:
+	default:
+		webError(w, "WritableGateway: failed to replace existing file", err, http.StatusBadRequest)
+		return false
+	}
+
+	err = mfs.PutNode(root, dstPath, nd)
+	if err != nil {
+		webError(w, "WritableGateway: failed to put node in MFS directory", err, http.StatusInternalServerError)
 		return false
 	}
 
@@ -940,8 +1005,9 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, gopath.Join(ipfsPathPrefix+ncid.String(), directory), http.StatusCreated)
 }
 
+// ipnsPostHandler takes an /ipfs/ path in the body and updates the /ipns/ path in URL
 func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 60)
+	// Decode path into required elements
 
 	rootPath, err := path.ParsePath(r.URL.Path)
 	if err != nil {
@@ -949,24 +1015,42 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	segs := rootPath.Segments()
-	if len(segs) > 2 {
-		webError(w, "makeworld: IPNS subpaths are not implemented yet", err, http.StatusBadRequest)
+	if len(segs) < 2 {
+		webError(w, "WritableGateway: no IPNS key name specified", err, http.StatusBadRequest)
 		return
 	}
+	var keyName string
+	var ipnsPath string // No leading slash
+	if len(segs) == 2 {
+		keyName = segs[1]
+	} else {
+		keyName = segs[1]
+		// Path is there
+		ipnsPath = strings.Join(segs[2:], "/")
+		if r.URL.Path[len(r.URL.Path)-1] == '/' {
+			ipnsPath += "/"
+		}
+	}
 
-	// Verify body is a valid CID
+	// Verify body is a valid /ipfs/ path
+
 	buf, err := io.ReadAll(r.Body)
 	if err != nil {
-		webError(w, "WritableGateway: body is not a valid CID (too long)", err, http.StatusBadRequest)
+		webError(w, "WritableGateway: body is not a valid IPFS path (too long)", err, http.StatusBadRequest)
 		return
 	}
-	bodyCid, err := cid.Decode(string(buf))
+	ipfsPath, err := path.ParsePath(string(buf))
 	if err != nil {
-		webError(w, "WritableGateway: body is not a valid CID", err, http.StatusBadRequest)
+		webError(w, "WritableGateway: body is not a valid IPFS path", err, http.StatusBadRequest)
+		return
+	}
+	if ipfsPath.Segments()[0] != "ipfs" {
+		webError(w, "WritableGateway: body is not a /ipfs/ path", err, http.StatusBadRequest)
 		return
 	}
 
-	keyName := segs[1]
+	// Create key if needed
+
 	has, err := i.keystore.Has(keyName)
 	if err != nil {
 		internalWebError(w, err)
@@ -981,13 +1065,76 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	ipnsEntry, err := i.api.Name().Publish(
-		r.Context(), ipath.IpfsPath(bodyCid),
-		options.Name.AllowOffline(true), options.Name.Key(keyName),
-	)
-	if err != nil {
-		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
-		return
+	var ipnsEntry coreiface.IpnsEntry
+	if ipnsPath == "" {
+		// Root is being replaced, so the provided /ipfs/ path can just be published
+
+		ipnsEntry, err = i.api.Name().Publish(
+			r.Context(), ipath.New(ipfsPath.String()),
+			options.Name.AllowOffline(true), options.Name.Key(keyName),
+		)
+		if err != nil {
+			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// A subpath of the IPNS dir is being replaced
+		// Must resolve and replace
+
+		// Turn key name into string representation of public key
+
+		sk, err := i.keystore.Get(keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		pk := sk.GetPublic()
+		pid, err := peer.IDFromPublicKey(pk)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyStr := keyEnc.FormatID(pid)
+
+		// Get current IPFS path and CID
+		resolvedPath, err := i.api.Name().Resolve(r.Context(), keyStr)
+		if err != nil {
+			webError(w, "WritableGateway: failed to resolve path", err, http.StatusInternalServerError)
+			return
+		}
+		segs := strings.Split(resolvedPath.String(), "/")
+		resolvedCid := segs[2]
+
+		// Add file/dir to path
+
+		root, ok := i.rootFromCid(w, r, cidMustDecode(resolvedCid))
+		if !ok {
+			return
+		}
+		ok = i.addIpfsPathToDir(w, r, root, ipath.New(ipfsPath.String()), ipnsPath)
+		if !ok {
+			return
+		}
+		nnode, ok := i.finalizeDir(w, root)
+		if !ok {
+			return
+		}
+
+		// Publish new path
+
+		ipnsEntry, err = i.api.Name().Publish(
+			r.Context(), ipath.IpfsPath(nnode.Cid()),
+			options.Name.AllowOffline(true), options.Name.Key(keyName),
+		)
+		if err != nil {
+			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Add("Content-Type", "text/plain")
