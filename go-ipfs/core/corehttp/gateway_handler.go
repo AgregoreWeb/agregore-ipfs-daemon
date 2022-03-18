@@ -43,10 +43,10 @@ const (
 	ipfsPathPrefix = "/ipfs/"
 	ipnsPathPrefix = "/ipns/"
 
-	empyDirCidStr = "QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"
+	emptyDirCidStr = "QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"
 )
 
-var empyDirCid = cidMustDecode(empyDirCidStr)
+var empyDirCid = cidMustDecode(emptyDirCidStr)
 
 var onlyAscii = regexp.MustCompile("[[:^ascii:]]")
 
@@ -170,7 +170,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		case http.MethodPut:
-			i.putHandler(w, r)
+			if strings.HasPrefix(r.URL.Path, ipnsPathPrefix) {
+				i.ipnsPutHandler(w, r)
+			} else {
+				i.ipfsPutHandler(w, r)
+			}
 			return
 		case http.MethodDelete:
 			i.deleteHandler(w, r)
@@ -879,7 +883,7 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/ipfs/"+cidStr, http.StatusCreated)
 }
 
-func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request) {
+func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) {
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -931,6 +935,50 @@ func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request) {
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
 	http.Redirect(w, r, gopath.Join(ipfsPathPrefix, cidStr, newPath), http.StatusCreated)
+}
+
+type stringsCloser struct {
+	*strings.Reader
+	closeFunc func() error
+}
+
+func (sc *stringsCloser) Close() error {
+	return sc.closeFunc()
+}
+
+func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) {
+	mpr, err := r.MultipartReader()
+	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		// Unexpected error
+		internalWebError(w, err)
+		return
+	}
+
+	var cidStr string
+
+	if mpr == nil {
+		// Add just a single file
+		p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		cidStr = p.Cid().String()
+	} else {
+		// Add multiple files from the form data
+
+		newCid, ok := i.addFilesFromForm(w, r, empyDirCid, mpr)
+		if !ok {
+			// Sending error to client is handled in the func
+			return
+		}
+		cidStr = newCid.String()
+	}
+
+	// Take the CID and simulate an IPNS POST request with it
+
+	r.Body = &stringsCloser{strings.NewReader(cidStr), func() error { return r.Body.Close() }}
+	i.ipnsPostHandler(w, r)
 }
 
 func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -1135,12 +1183,16 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		// Get current IPFS path and CID
 		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
-		if err != nil {
-			webError(w, "WritableGateway: failed to resolve path", err, http.StatusInternalServerError)
-			return
+		var resolvedCid string
+		if err == nil {
+			segs := strings.Split(resolvedPath.String(), "/")
+			resolvedCid = segs[2]
+		} else {
+			// Path couldn't be resolved
+			// This probably means that it doesn't exist
+			// So create it, using the empty dir CID
+			resolvedCid = emptyDirCidStr
 		}
-		segs := strings.Split(resolvedPath.String(), "/")
-		resolvedCid := segs[2]
 
 		// Add file/dir to path
 
@@ -1169,6 +1221,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Add("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
 	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), ipnsPath), http.StatusTemporaryRedirect)
 }
