@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	golog "log"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -46,9 +47,11 @@ const (
 	emptyDirCidStr = "QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"
 )
 
-var empyDirCid = cidMustDecode(emptyDirCidStr)
+var emptyDirCid = cidMustDecode(emptyDirCidStr)
 
 var onlyAscii = regexp.MustCompile("[[:^ascii:]]")
+
+var _ golog.Logger // Keep import around
 
 // HTML-based redirect for errors which can be recovered from, but we want
 // to provide hint to people that they should fix things on their end.
@@ -764,7 +767,7 @@ func (i *gatewayHandler) addIpfsPathToDir(
 
 	newDirectory, newFileName := gopath.Split(dstPath)
 
-	if newDirectory != "/" {
+	if newDirectory != "/" && newDirectory != "" {
 		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
 		if err != nil {
 			webError(w, "WritableGateway: failed to create MFS directory", err, http.StatusInternalServerError)
@@ -870,7 +873,7 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, empyDirCid, mpr)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -967,7 +970,7 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, empyDirCid, mpr)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -976,6 +979,11 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Take the CID and simulate an IPNS POST request with it
+
+	if mpr != nil {
+		// Remove ending slash so that files go inside directory specified
+		r.URL.Path = strings.TrimRight(r.URL.Path, "/")
+	}
 
 	r.Body = &stringsCloser{strings.NewReader(cidStr), func() error { return r.Body.Close() }}
 	i.ipnsPostHandler(w, r)
