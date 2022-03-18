@@ -330,12 +330,12 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 
 	if ok {
 		if jsonListing {
-			responseEtag = `"DirIndex-json_CID-` + resolvedPath.Cid().String() + `"`
+			responseEtag = `"DirIndex-json_CID-` + getV1(resolvedPath.Cid()).String() + `"`
 		} else if assets.BindataVersionHash != "" {
-			responseEtag = `"DirIndex-` + assets.BindataVersionHash + `_CID-` + resolvedPath.Cid().String() + `"`
+			responseEtag = `"DirIndex-` + assets.BindataVersionHash + `_CID-` + getV1(resolvedPath.Cid()).String() + `"`
 		}
 	} else {
-		responseEtag = `"` + resolvedPath.Cid().String() + `"`
+		responseEtag = `"` + getV1(resolvedPath.Cid()).String() + `"`
 	}
 
 	// Check etag sent back to us
@@ -347,6 +347,7 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPFS-Path", urlPath)
 	w.Header().Set("Etag", responseEtag)
+	w.Header().Set("IPFS-Hash", getV1(resolvedPath.Cid()).String())
 
 	// set these headers _after_ the error, for we may just not have it
 	// and don't want the client to cache a 500 response...
@@ -414,7 +415,7 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 
 		// static index.html → no need to generate dynamic dir-index-html
 		// replace mutable DirIndex Etag with immutable dir CID
-		w.Header().Set("Etag", `"`+resolvedPath.Cid().String()+`"`)
+		w.Header().Set("Etag", `"`+getV1(resolvedPath.Cid()).String()+`"`)
 
 		// write to request
 		i.serveFile(w, r, "index.html", modtime, f)
@@ -489,7 +490,7 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 			internalWebError(w, err)
 			return
 		}
-		hash := resolved.Cid().String()
+		hash := getV1(resolved.Cid()).String()
 
 		// See comment above where originalUrlPath is declared.
 		di := directoryItem{
@@ -534,7 +535,7 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 		size = humanize.Bytes(uint64(s))
 	}
 
-	hash := resolvedPath.Cid().String()
+	hash := getV1(resolvedPath.Cid()).String()
 
 	// Gateway root URL to be used when linking to other rootIDs.
 	// This will be blank unless subdomain or DNSLink resolution is being used
@@ -869,7 +870,7 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 			internalWebError(w, err)
 			return
 		}
-		cidStr = p.Cid().String()
+		cidStr = getV1(p.Cid()).String()
 	} else {
 		// Add multiple files from the form data
 
@@ -878,12 +879,13 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 			// Sending error to client is handled in the func
 			return
 		}
-		cidStr = newCid.String()
+		// Convert to CIDv1 first if needed
+		cidStr = getV1(newCid).String()
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
-	http.Redirect(w, r, "/ipfs/"+cidStr, http.StatusCreated)
+	http.Redirect(w, r, "ipfs://"+cidStr, http.StatusCreated)
 }
 
 func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) {
@@ -923,7 +925,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 		if !ok {
 			return
 		}
-		cidStr = nnode.Cid().String()
+		cidStr = getV1(nnode.Cid()).String()
 	} else {
 		// Add multiple files from the form data
 
@@ -932,12 +934,12 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 			// Sending error to client is handled in the func
 			return
 		}
-		cidStr = newCid.String()
+		cidStr = getV1(newCid).String()
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
-	http.Redirect(w, r, gopath.Join(ipfsPathPrefix, cidStr, newPath), http.StatusCreated)
+	http.Redirect(w, r, "ipfs:/"+gopath.Join("/", cidStr, newPath), http.StatusCreated)
 }
 
 type stringsCloser struct {
@@ -1053,7 +1055,7 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		webError(w, "WritableGateway: failed to finalize", err, http.StatusInternalServerError)
 	}
-	ncid := nnode.Cid()
+	ncid := getV1(nnode.Cid())
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", ncid.String())
@@ -1350,4 +1352,12 @@ func cidMustDecode(s string) cid.Cid {
 		panic(err)
 	}
 	return c
+}
+
+// getV1 always returns a CIDv1
+func getV1(c cid.Cid) cid.Cid {
+	if c.Version() == 1 {
+		return c
+	}
+	return cid.NewCidV1(c.Prefix().Codec, c.Hash())
 }
