@@ -1019,16 +1019,34 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		webError(w, "WritableGateway: no IPNS key name specified", err, http.StatusBadRequest)
 		return
 	}
-	var keyName string
-	var ipnsPath string // No leading slash
+	var keyFromPath string // full public key
+	var ipnsPath string    // No leading slash
 	if len(segs) == 2 {
-		keyName = segs[1]
+		keyFromPath = segs[1]
 	} else {
-		keyName = segs[1]
+		keyFromPath = segs[1]
 		// Path is there
 		ipnsPath = strings.Join(segs[2:], "/")
 		if r.URL.Path[len(r.URL.Path)-1] == '/' {
 			ipnsPath += "/"
+		}
+	}
+
+	var keyName string
+	if keyFromPath == "localhost" {
+		// URL is something like these:
+		// /ipns/localhost?key=my_petname
+		// /ipns/localhost/some/path?key=my_other_petname
+
+		// We don't have the key, only the key name
+		keyFromPath = ""
+		keyName = r.URL.Query().Get("key")
+		if keyName == "" {
+			webError(w,
+				"WritableGateway: localhost specified as IPNS key but no key param in query string",
+				nil, http.StatusBadRequest,
+			)
+			return
 		}
 	}
 
@@ -1050,19 +1068,29 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Create key if needed
-
-	has, err := i.keystore.Has(keyName)
-	if err != nil {
-		internalWebError(w, err)
-		return
-	}
-	if !has {
-		// Generate key with name
-		_, err = i.api.Key().Generate(r.Context(), keyName)
+	if keyFromPath == "" {
+		has, err := i.keystore.Has(keyName)
 		if err != nil {
 			internalWebError(w, err)
 			return
 		}
+		if !has {
+			// Generate key with name
+			_, err = i.api.Key().Generate(r.Context(), keyName)
+			if err != nil {
+				internalWebError(w, err)
+				return
+			}
+		}
+	}
+
+	// Publish option specifiying key
+	// Use key name if possible, otherwise use full key
+	var keyOpt string
+	if keyName != "" {
+		keyOpt = keyName
+	} else {
+		keyOpt = keyFromPath
 	}
 
 	var ipnsEntry coreiface.IpnsEntry
@@ -1071,7 +1099,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.New(ipfsPath.String()),
-			options.Name.AllowOffline(true), options.Name.Key(keyName),
+			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
@@ -1083,26 +1111,30 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		// Turn key name into string representation of public key
 
-		sk, err := i.keystore.Get(keyName)
-		if err != nil {
-			internalWebError(w, err)
-			return
+		keyStr := keyFromPath
+
+		if keyFromPath == "" {
+			sk, err := i.keystore.Get(keyName)
+			if err != nil {
+				internalWebError(w, err)
+				return
+			}
+			pk := sk.GetPublic()
+			pid, err := peer.IDFromPublicKey(pk)
+			if err != nil {
+				internalWebError(w, err)
+				return
+			}
+			keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+			if err != nil {
+				internalWebError(w, err)
+				return
+			}
+			keyStr = keyEnc.FormatID(pid)
 		}
-		pk := sk.GetPublic()
-		pid, err := peer.IDFromPublicKey(pk)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyStr := keyEnc.FormatID(pid)
 
 		// Get current IPFS path and CID
-		resolvedPath, err := i.api.Name().Resolve(r.Context(), keyStr)
+		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
 		if err != nil {
 			webError(w, "WritableGateway: failed to resolve path", err, http.StatusInternalServerError)
 			return
@@ -1129,7 +1161,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.IpfsPath(nnode.Cid()),
-			options.Name.AllowOffline(true), options.Name.Key(keyName),
+			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
@@ -1137,8 +1169,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	w.Header().Add("Content-Type", "text/plain")
-	fmt.Fprint(w, ipnsEntry.Name())
+	w.Header().Add("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
+	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), ipnsPath), http.StatusTemporaryRedirect)
 }
 
 func (i *gatewayHandler) addUserHeaders(w http.ResponseWriter) {
