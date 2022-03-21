@@ -27,7 +27,6 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	assets "github.com/ipfs/go-ipfs/assets"
 	ke "github.com/ipfs/go-ipfs/core/commands/keyencode"
-	ipld "github.com/ipfs/go-ipld-format"
 	dag "github.com/ipfs/go-merkledag"
 	mfs "github.com/ipfs/go-mfs"
 	path "github.com/ipfs/go-path"
@@ -180,7 +179,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		case http.MethodDelete:
-			i.deleteHandler(w, r)
+			if strings.HasPrefix(r.URL.Path, ipnsPathPrefix) {
+				i.ipnsDeleteHandler(w, r)
+			} else {
+				i.ipfsDeleteHandler(w, r)
+			}
 			return
 		}
 	}
@@ -803,15 +806,46 @@ func (i *gatewayHandler) addIpfsPathToDir(
 	return true
 }
 
+func (i *gatewayHandler) removePathFromDir(
+	w http.ResponseWriter, r *http.Request,
+	root *mfs.Root, path string) bool {
+
+	directory, filename := gopath.Split(path)
+
+	// lookup the parent directory
+
+	parentNode, err := mfs.Lookup(root, directory)
+	if err != nil {
+		webError(w, "WritableGateway: failed to look up parent", err, http.StatusInternalServerError)
+		return false
+	}
+
+	parent, ok := parentNode.(*mfs.Directory)
+	if !ok {
+		http.Error(w, "WritableGateway: parent is not a directory", http.StatusInternalServerError)
+		return false
+	}
+
+	// delete the file
+
+	switch parent.Unlink(filename) {
+	case nil, os.ErrNotExist:
+	default:
+		webError(w, "WritableGateway: failed to remove file", err, http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
 // finalizeDir finalizes that the provided root directory, confirming that all files
 // were added successfully. It returns false if an error was sent to the user.
-func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (ipld.Node, bool) {
+func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (cid.Cid, bool) {
 	node, err := root.GetDirectory().GetNode()
 	if err != nil {
 		webError(w, "WritableGateway: failed to finalize", err, http.StatusInternalServerError)
-		return nil, false
+		return cid.Cid{}, false
 	}
-	return node, true
+	return node.Cid(), true
 }
 
 // addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
@@ -846,11 +880,11 @@ func (i *gatewayHandler) addFilesFromForm(
 		}
 	}
 
-	nnode, ok := i.finalizeDir(w, root)
+	ncid, ok := i.finalizeDir(w, root)
 	if !ok {
 		return cid.Cid{}, false
 	}
-	return nnode.Cid(), true
+	return ncid, true
 }
 
 func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -921,11 +955,11 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 		if ok := i.addFileToDir(w, r, root, newPath, r.Body); !ok {
 			return
 		}
-		nnode, ok := i.finalizeDir(w, root)
+		ncid, ok := i.finalizeDir(w, root)
 		if !ok {
 			return
 		}
-		cidStr = getV1(nnode.Cid()).String()
+		cidStr = getV1(ncid).String()
 	} else {
 		// Add multiple files from the form data
 
@@ -991,9 +1025,7 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	i.ipnsPostHandler(w, r)
 }
 
-func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
+func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	// parse the path
 
 	rootCid, newPath, err := parseIpfsPath(r.URL.Path)
@@ -1005,68 +1037,32 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
 		return
 	}
-	directory, filename := gopath.Split(newPath)
 
-	// lookup the root
-
-	rootNodeIPLD, err := i.api.Dag().Get(ctx, rootCid)
-	if err != nil {
-		webError(w, "WritableGateway: failed to resolve root CID", err, http.StatusInternalServerError)
-		return
-	}
-	rootNode, ok := rootNodeIPLD.(*dag.ProtoNode)
+	root, ok := i.rootFromCid(w, r, rootCid)
 	if !ok {
-		http.Error(w, "WritableGateway: empty path", http.StatusInternalServerError)
 		return
 	}
-
-	// construct the mfs root
-
-	root, err := mfs.NewRoot(ctx, i.api.Dag(), rootNode, nil)
-	if err != nil {
-		webError(w, "WritableGateway: failed to construct the MFS root", err, http.StatusBadRequest)
+	if !i.removePathFromDir(w, r, root, newPath) {
 		return
 	}
-
-	// lookup the parent directory
-
-	parentNode, err := mfs.Lookup(root, directory)
-	if err != nil {
-		webError(w, "WritableGateway: failed to look up parent", err, http.StatusInternalServerError)
-		return
-	}
-
-	parent, ok := parentNode.(*mfs.Directory)
+	ncid, ok := i.finalizeDir(w, root)
 	if !ok {
-		http.Error(w, "WritableGateway: parent is not a directory", http.StatusInternalServerError)
 		return
 	}
-
-	// delete the file
-
-	switch parent.Unlink(filename) {
-	case nil, os.ErrNotExist:
-	default:
-		webError(w, "WritableGateway: failed to remove file", err, http.StatusInternalServerError)
-		return
-	}
-
-	nnode, err := root.GetDirectory().GetNode()
-	if err != nil {
-		webError(w, "WritableGateway: failed to finalize", err, http.StatusInternalServerError)
-	}
-	ncid := getV1(nnode.Cid())
+	cidStr := getV1(ncid).String()
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
-	w.Header().Set("IPFS-Hash", ncid.String())
+	w.Header().Set("IPFS-Hash", cidStr)
 	// note: StatusCreated is technically correct here as we created a new resource.
-	http.Redirect(w, r, gopath.Join(ipfsPathPrefix+ncid.String(), directory), http.StatusCreated)
+	http.Redirect(w, r, "ipfs:/"+gopath.Join("/"+cidStr, gopath.Dir(newPath)), http.StatusCreated)
 }
 
-// ipnsPostHandler takes an /ipfs/ path in the body and updates the /ipns/ path in URL
-func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request) {
-	// Decode path into required elements
-
+func decodeIpnsPath(w http.ResponseWriter, r *http.Request) (
+	ipnsPath, // part after key, no leading slash
+	keyName, // the custom name of the key
+	keyFromPath string, // full public key, the part after /ipns/
+	ok bool,
+) {
 	rootPath, err := path.ParsePath(r.URL.Path)
 	if err != nil {
 		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
@@ -1077,8 +1073,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		webError(w, "WritableGateway: no IPNS key name specified", err, http.StatusBadRequest)
 		return
 	}
-	var keyFromPath string // full public key
-	var ipnsPath string    // No leading slash
 	if len(segs) == 2 {
 		keyFromPath = segs[1]
 	} else {
@@ -1090,7 +1084,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	var keyName string
 	if keyFromPath == "localhost" {
 		// URL is something like these:
 		// /ipns/localhost?key=my_petname
@@ -1106,6 +1099,112 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			)
 			return
 		}
+	}
+
+	ok = true
+	return
+}
+
+func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	ipnsPath, keyName, keyFromPath, ok := decodeIpnsPath(w, r)
+	if !ok {
+		return
+	}
+
+	// Remove trailing slash from ipnsPath if it exists
+	// Otherwise directories won't be removed
+	ipnsPath = strings.TrimRight(ipnsPath, "/")
+
+	if keyFromPath == "" {
+		has, err := i.keystore.Has(keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		if !has {
+			// Key doesn't exist and so won't resolve to anything
+			// So no files can be deleted from it
+			webError(w, "Key does not exist", nil, http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Turn key name into string representation of public key
+
+	keyStr := keyFromPath
+
+	if keyFromPath == "" {
+		sk, err := i.keystore.Get(keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		pk := sk.GetPublic()
+		pid, err := peer.IDFromPublicKey(pk)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyStr = keyEnc.FormatID(pid)
+	}
+
+	// Get current IPFS path and CID
+	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+	if err != nil {
+		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
+		return
+	}
+	resolvedCid := strings.Split(resolvedPath.String(), "/")[2]
+
+	// Remove file/dir
+
+	root, ok := i.rootFromCid(w, r, cidMustDecode(resolvedCid))
+	if !ok {
+		return
+	}
+	if !i.removePathFromDir(w, r, root, ipnsPath) {
+		return
+	}
+	ncid, ok := i.finalizeDir(w, root)
+	if !ok {
+		return
+	}
+
+	// Publish new path
+
+	// Publish option specifiying key
+	// Use key name if possible, otherwise use full key
+	var keyOpt string
+	if keyName != "" {
+		keyOpt = keyName
+	} else {
+		keyOpt = keyFromPath
+	}
+
+	ipnsEntry, err := i.api.Name().Publish(
+		r.Context(), ipath.IpfsPath(ncid),
+		options.Name.AllowOffline(true), options.Name.Key(keyOpt),
+	)
+	if err != nil {
+		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
+		return
+	}
+
+	i.addUserHeaders(w) // ok, _now_ write user's headers.
+	w.Header().Add("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), gopath.Dir(ipnsPath)))
+	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), gopath.Dir(ipnsPath)), http.StatusTemporaryRedirect)
+}
+
+// ipnsPostHandler takes an /ipfs/ path in the body and updates the /ipns/ path in URL
+func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request) {
+	ipnsPath, keyName, keyFromPath, ok := decodeIpnsPath(w, r)
+	if !ok {
+		return
 	}
 
 	// Verify body is a valid /ipfs/ path
@@ -1214,7 +1313,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		if !ok {
 			return
 		}
-		nnode, ok := i.finalizeDir(w, root)
+		ncid, ok := i.finalizeDir(w, root)
 		if !ok {
 			return
 		}
@@ -1222,7 +1321,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		// Publish new path
 
 		ipnsEntry, err = i.api.Name().Publish(
-			r.Context(), ipath.IpfsPath(nnode.Cid()),
+			r.Context(), ipath.IpfsPath(ncid),
 			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 		)
 		if err != nil {
