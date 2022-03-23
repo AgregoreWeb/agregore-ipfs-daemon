@@ -86,6 +86,12 @@ func setupConfig(cfg *config.Config) {
 	cfg.Swarm.EnableHolePunching = config.True
 	// Limit repo size
 	cfg.Datastore.StorageMax = "1GiB"
+
+	// Custom gateway headers
+	cfg.Gateway.HTTPHeaders = make(map[string][]string)
+	cfg.Gateway.HTTPHeaders["Access-Control-Allow-Methods"] = []string{"GET", "HEAD", "POST", "PUT"}
+	cfg.Gateway.HTTPHeaders["Access-Control-Allow-Headers"] = []string{"X-IPFS-Pin"}
+	cfg.Gateway.HTTPHeaders["Access-Control-Expose-Headers"] = []string{"IPFS-Hash", "X-IPFS-Path", "X-IPNS-Path", "Etag"}
 }
 
 func createRepo(path string) error {
