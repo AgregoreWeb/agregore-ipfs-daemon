@@ -43,7 +43,8 @@ const (
 	ipfsPathPrefix = "/ipfs/"
 	ipnsPathPrefix = "/ipns/"
 
-	emptyDirCidStr = "QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"
+	// CIDv1 for an empty directory
+	emptyDirCidStr = "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"
 )
 
 var emptyDirCid = cidMustDecode(emptyDirCidStr)
@@ -694,7 +695,9 @@ func (i *gatewayHandler) addFileToDir(
 
 	// Create the new file.
 
-	newFilePath, err := i.api.Unixfs().Add(ctx, files.NewReaderFile(file))
+	newFilePath, err := i.api.Unixfs().Add(
+		ctx, files.NewReaderFile(file), options.Unixfs.CidVersion(1),
+	)
 	if err != nil {
 		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
 		return false
@@ -899,7 +902,9 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 
 	if mpr == nil {
 		// Add just a single file
-		p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
+		p, err := i.api.Unixfs().Add(
+			r.Context(), files.NewReaderFile(r.Body), options.Unixfs.CidVersion(1),
+		)
 		if err != nil {
 			internalWebError(w, err)
 			return
@@ -997,7 +1002,9 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 
 	if mpr == nil {
 		// Add just a single file
-		p, err := i.api.Unixfs().Add(r.Context(), files.NewReaderFile(r.Body))
+		p, err := i.api.Unixfs().Add(
+			r.Context(), files.NewReaderFile(r.Body), options.Unixfs.CidVersion(1),
+		)
 		if err != nil {
 			internalWebError(w, err)
 			return
