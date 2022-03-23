@@ -45,6 +45,8 @@ const (
 
 	// CIDv1 for an empty directory
 	emptyDirCidStr = "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"
+
+	pinHeader = "X-IPFS-Pin"
 )
 
 var emptyDirCid = cidMustDecode(emptyDirCidStr)
@@ -688,7 +690,7 @@ func (i *gatewayHandler) rootFromCid(w http.ResponseWriter, r *http.Request, roo
 // to make sure they've been added succesfully.
 func (i *gatewayHandler) addFileToDir(
 	w http.ResponseWriter, r *http.Request,
-	root *mfs.Root, path string, file io.ReadCloser) bool {
+	root *mfs.Root, path string, file io.ReadCloser, pin bool) bool {
 
 	ctx := r.Context()
 	ds := i.api.Dag()
@@ -696,7 +698,10 @@ func (i *gatewayHandler) addFileToDir(
 	// Create the new file.
 
 	newFilePath, err := i.api.Unixfs().Add(
-		ctx, files.NewReaderFile(file), options.Unixfs.CidVersion(1),
+		ctx,
+		files.NewReaderFile(file),
+		options.Unixfs.CidVersion(1),
+		options.Unixfs.Pin(pin),
 	)
 	if err != nil {
 		webError(w, "WritableGateway: could not create DAG from request", err, http.StatusInternalServerError)
@@ -854,7 +859,8 @@ func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (cid
 // addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
 // It returns false if an error was sent to the user.
 func (i *gatewayHandler) addFilesFromForm(
-	w http.ResponseWriter, r *http.Request, dir cid.Cid, mpr *multipart.Reader) (cid.Cid, bool) {
+	w http.ResponseWriter, r *http.Request,
+	dir cid.Cid, mpr *multipart.Reader, pin bool) (cid.Cid, bool) {
 
 	// Get dir
 	root, ok := i.rootFromCid(w, r, dir)
@@ -878,7 +884,7 @@ func (i *gatewayHandler) addFilesFromForm(
 			continue
 		}
 
-		if ok := i.addFileToDir(w, r, root, part.FileName(), part); !ok {
+		if ok := i.addFileToDir(w, r, root, part.FileName(), part, pin); !ok {
 			return cid.Cid{}, false
 		}
 	}
@@ -898,12 +904,17 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	shouldPin := r.Header.Get(pinHeader) != ""
+
 	var cidStr string
 
 	if mpr == nil {
 		// Add just a single file
 		p, err := i.api.Unixfs().Add(
-			r.Context(), files.NewReaderFile(r.Body), options.Unixfs.CidVersion(1),
+			r.Context(),
+			files.NewReaderFile(r.Body),
+			options.Unixfs.CidVersion(1),
+			options.Unixfs.Pin(shouldPin),
 		)
 		if err != nil {
 			internalWebError(w, err)
@@ -913,7 +924,7 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, shouldPin)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -947,6 +958,8 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	shouldPin := r.Header.Get(pinHeader) != ""
+
 	var cidStr string
 
 	if mpr == nil {
@@ -957,7 +970,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 			// Sending error to client is handled in the func
 			return
 		}
-		if ok := i.addFileToDir(w, r, root, newPath, r.Body); !ok {
+		if ok := i.addFileToDir(w, r, root, newPath, r.Body, shouldPin); !ok {
 			return
 		}
 		ncid, ok := i.finalizeDir(w, root)
@@ -968,7 +981,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, rootCid, mpr)
+		newCid, ok := i.addFilesFromForm(w, r, rootCid, mpr, shouldPin)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -1013,7 +1026,8 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr)
+		// Don't pin because ipnsPostHandler will pin later if everything is successful
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
