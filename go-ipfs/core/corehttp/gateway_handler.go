@@ -1218,16 +1218,13 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 	buf, err := io.ReadAll(r.Body)
 	if err != nil {
-		webError(w, "WritableGateway: body is not a valid IPFS path (too long)", err, http.StatusBadRequest)
+		webError(w, "WritableGateway: failed to read body", err, http.StatusBadRequest)
 		return
 	}
-	ipfsPath, err := path.ParsePath(string(buf))
+	bodyPath := string(buf)
+	inCid, _, err := parseIpfsPath(bodyPath)
 	if err != nil {
-		webError(w, "WritableGateway: body is not a valid IPFS path", err, http.StatusBadRequest)
-		return
-	}
-	if ipfsPath.Segments()[0] != "ipfs" {
-		webError(w, "WritableGateway: body is not a /ipfs/ path", err, http.StatusBadRequest)
+		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
 		return
 	}
 
@@ -1257,70 +1254,70 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		keyOpt = keyFromPath
 	}
 
+	// Turn key name into string representation of public key
+	keyStr := keyFromPath
+	if keyFromPath == "" {
+		sk, err := i.keystore.Get(keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		pk := sk.GetPublic()
+		pid, err := peer.IDFromPublicKey(pk)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyStr = keyEnc.FormatID(pid)
+	}
+
+	// Get current IPFS path and CID
+	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+	var resolvedCid cid.Cid
+	if err == nil {
+		segs := strings.Split(resolvedPath.String(), "/")
+		resolvedCid = cidMustDecode(segs[2])
+	} else {
+		// Path couldn't be resolved
+		// This probably means that it doesn't exist
+		// So create it, using the empty dir CID
+		resolvedCid = emptyDirCid
+	}
+
 	var ipnsEntry coreiface.IpnsEntry
+	var newCid cid.Cid
+
 	if ipnsPath == "" {
 		// Root is being replaced, so the provided /ipfs/ path can just be published
 
 		ipnsEntry, err = i.api.Name().Publish(
-			r.Context(), ipath.New(ipfsPath.String()),
+			r.Context(), ipath.New(bodyPath),
 			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
 			return
 		}
+		newCid = inCid
 	} else {
 		// A subpath of the IPNS dir is being replaced
-		// Must resolve and replace
-
-		// Turn key name into string representation of public key
-
-		keyStr := keyFromPath
-
-		if keyFromPath == "" {
-			sk, err := i.keystore.Get(keyName)
-			if err != nil {
-				internalWebError(w, err)
-				return
-			}
-			pk := sk.GetPublic()
-			pid, err := peer.IDFromPublicKey(pk)
-			if err != nil {
-				internalWebError(w, err)
-				return
-			}
-			keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
-			if err != nil {
-				internalWebError(w, err)
-				return
-			}
-			keyStr = keyEnc.FormatID(pid)
-		}
-
-		// Get current IPFS path and CID
-		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
-		var resolvedCid string
-		if err == nil {
-			segs := strings.Split(resolvedPath.String(), "/")
-			resolvedCid = segs[2]
-		} else {
-			// Path couldn't be resolved
-			// This probably means that it doesn't exist
-			// So create it, using the empty dir CID
-			resolvedCid = emptyDirCidStr
-		}
 
 		// Add file/dir to path
 
-		root, ok := i.rootFromCid(w, r, cidMustDecode(resolvedCid))
+		root, ok := i.rootFromCid(w, r, resolvedCid)
 		if !ok {
 			return
 		}
-		ok = i.addIpfsPathToDir(w, r, root, ipath.New(ipfsPath.String()), ipnsPath)
+		ok = i.addIpfsPathToDir(w, r, root, ipath.New(bodyPath), ipnsPath)
 		if !ok {
 			return
 		}
-		ncid, ok := i.finalizeDir(w, root)
+		newCid, ok = i.finalizeDir(w, root)
 		if !ok {
 			return
 		}
@@ -1328,11 +1325,28 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		// Publish new path
 
 		ipnsEntry, err = i.api.Name().Publish(
-			r.Context(), ipath.IpfsPath(ncid),
+			r.Context(), ipath.IpfsPath(newCid),
 			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Successfully published new path
+	// Pin content and unpin old
+
+	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+	if err != nil {
+		webError(w, "WritableGateway: name published but failed to pin new content", err, http.StatusInternalServerError)
+		return
+	}
+	if !resolvedCid.Equals(emptyDirCid) {
+		// There was something previously there to unpin
+		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+		if err != nil {
+			webError(w, "WritableGateway: name published but failed to unpin new content", err, http.StatusInternalServerError)
 			return
 		}
 	}
