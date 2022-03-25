@@ -34,8 +34,6 @@ import (
 	_ "github.com/mtibben/androiddnsfix"
 )
 
-const ipfsRepoPath = "agregore-ipfs-repo"
-
 // Error channels that need to be tracked
 var errChs = make([]<-chan error, 0)
 
@@ -62,11 +60,6 @@ func setupPlugins(externalPluginsPath string) error {
 
 // setupConfig applies custom settings to an IPFS config
 func setupConfig(cfg *config.Config) {
-	wd, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("couldn't get working directory: %v", err)
-	}
-
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/config.md
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md
 
@@ -74,8 +67,8 @@ func setupConfig(cfg *config.Config) {
 	cfg.Ipns.UsePubsub = config.True
 	// Disable API to prevent malicious apps from using
 	cfg.Addresses.API = []string{}
-	// Run gateway on Unix socket
-	cfg.Addresses.Gateway = []string{filepath.Join("/unix/", wd, "gateway.sock")}
+	// Run gateway on ~~Unix socket~~ leave as default for now
+	cfg.Addresses.Gateway = []string{"/ip4/127.0.0.1/tcp/8080"}
 	cfg.Gateway.Writable = true
 	// Reduce number of peer connections to reduce resource usage
 	// TODO: needs tuning
@@ -177,6 +170,11 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.Ipfs
 
 // Spawns a node on the default repo location, creating it if it doesn't exist
 func spawnNode(ctx context.Context) (icore.CoreAPI, *core.IpfsNode, error) {
+	ipfsRepoPath := os.Getenv("AGREGORE_IPFS_REPO")
+	if ipfsRepoPath == "" {
+		ipfsRepoPath = "agregore-ipfs-repo" // For debugging
+	}
+
 	if err := setupPlugins(ipfsRepoPath); err != nil {
 		return nil, nil, err
 	}
