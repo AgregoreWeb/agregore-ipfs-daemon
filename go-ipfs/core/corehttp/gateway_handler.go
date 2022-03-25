@@ -688,6 +688,8 @@ func (i *gatewayHandler) rootFromCid(w http.ResponseWriter, r *http.Request, roo
 // addFileToDir adds a file to an existing MFS root. It returns false if
 // an error was sent to the user. Call finalizeDir after all files are added,
 // to make sure they've been added succesfully.
+//
+// path can begin with a slash but doesn't have to.
 func (i *gatewayHandler) addFileToDir(
 	w http.ResponseWriter, r *http.Request,
 	root *mfs.Root, path string, file io.ReadCloser, pin bool) bool {
@@ -717,6 +719,9 @@ func (i *gatewayHandler) addFileToDir(
 	// Patch the file into the root
 
 	newDirectory, newFileName := gopath.Split(path)
+
+	// Shouldn't begin with slash
+	newDirectory = strings.TrimLeft(newDirectory, "/")
 
 	if newDirectory != "" {
 		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
@@ -858,9 +863,11 @@ func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (cid
 
 // addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
 // It returns false if an error was sent to the user.
+//
+// subdir can be "" or "/" to add files to the root.
 func (i *gatewayHandler) addFilesFromForm(
 	w http.ResponseWriter, r *http.Request,
-	dir cid.Cid, mpr *multipart.Reader, pin bool) (cid.Cid, bool) {
+	dir cid.Cid, subdir string, mpr *multipart.Reader, pin bool) (cid.Cid, bool) {
 
 	// Get dir
 	root, ok := i.rootFromCid(w, r, dir)
@@ -884,7 +891,7 @@ func (i *gatewayHandler) addFilesFromForm(
 			continue
 		}
 
-		if ok := i.addFileToDir(w, r, root, part.FileName(), part, pin); !ok {
+		if ok := i.addFileToDir(w, r, root, gopath.Join(subdir, part.FileName()), part, pin); !ok {
 			return cid.Cid{}, false
 		}
 	}
@@ -924,7 +931,7 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, shouldPin)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, shouldPin)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -981,7 +988,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, rootCid, mpr, shouldPin)
+		newCid, ok := i.addFilesFromForm(w, r, rootCid, newPath, mpr, shouldPin)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -1027,7 +1034,7 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 		// Add multiple files from the form data
 
 		// Don't pin because ipnsPostHandler will pin later if everything is successful
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, false)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
