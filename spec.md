@@ -112,6 +112,8 @@ If the directory path does not end in a `/`, a `/` is appended and the user is r
 
 Etags and range requests are supported. File mimetypes are detected and set in `Content-Type`.
 
+The header `X-IPFS-Path` is set to the URL path. `IPFS-Hash` is set to CID of the IPFS path provided, this may differ from the CID in the URL path.
+
 ### HEAD `/ipfs/<CID>[/<path>]`
 
 The same as GET, but with no response body.
@@ -171,6 +173,8 @@ Same as GET `/ipfs/<CID>[/<path>]`
 
 #### Response
 Resolves the IPNS key to an IPFS path, and then returns the same response as `/ipfs/`. Also supports resolving custom domains with [DNSLink](https://dnslink.io/).
+
+The header `X-IPFS-Path` is set to the URL path. `IPFS-Hash` is set to CID of the IPFS path provided, this may differ from the CID in the URL path. This allows for getting the CID of an IPNS path/key.
 
 ### POST `/ipns/<key>[/<path>]`
 
