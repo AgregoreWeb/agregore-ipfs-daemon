@@ -1,3 +1,5 @@
+project_name: agregore_ipfs_daemon
+
 before:
   hooks:
     - go mod tidy
