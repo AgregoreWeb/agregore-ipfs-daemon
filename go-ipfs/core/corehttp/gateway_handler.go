@@ -1242,18 +1242,19 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
 		return
 	}
-	resolvedCid := strings.Split(resolvedPath.String(), "/")[2]
+	resolvedCidStr := strings.Split(resolvedPath.String(), "/")[2]
+	resolvedCid := cidMustDecode(resolvedCidStr)
 
 	// Remove file/dir
 
-	root, ok := i.rootFromCid(w, r, cidMustDecode(resolvedCid))
+	root, ok := i.rootFromCid(w, r, resolvedCid)
 	if !ok {
 		return
 	}
 	if !i.removePathFromDir(w, r, root, ipnsPath) {
 		return
 	}
-	ncid, ok := i.finalizeDir(w, root)
+	newCid, ok := i.finalizeDir(w, root)
 	if !ok {
 		return
 	}
@@ -1270,12 +1271,31 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	ipnsEntry, err := i.api.Name().Publish(
-		r.Context(), ipath.IpfsPath(ncid),
+		r.Context(), ipath.IpfsPath(newCid),
 		options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 	)
 	if err != nil {
 		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
 		return
+	}
+
+	// Successfully published new path
+	// Pin content and unpin old
+
+	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+	if err != nil {
+		webError(w, "WritableGateway: name published but failed to pin new content", err,
+			http.StatusInternalServerError)
+		return
+	}
+	if !getV1(resolvedCid).Equals(emptyDirCid) {
+		// There was something previously there to unpin
+		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+		if err != nil {
+			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+				http.StatusInternalServerError)
+			return
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -1415,14 +1435,16 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
 	if err != nil {
-		webError(w, "WritableGateway: name published but failed to pin new content", err, http.StatusInternalServerError)
+		webError(w, "WritableGateway: name published but failed to pin new content", err,
+			http.StatusInternalServerError)
 		return
 	}
-	if !resolvedCid.Equals(emptyDirCid) {
+	if !getV1(resolvedCid).Equals(emptyDirCid) {
 		// There was something previously there to unpin
 		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
 		if err != nil {
-			webError(w, "WritableGateway: name published but failed to unpin new content", err, http.StatusInternalServerError)
+			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+				http.StatusInternalServerError)
 			return
 		}
 	}
