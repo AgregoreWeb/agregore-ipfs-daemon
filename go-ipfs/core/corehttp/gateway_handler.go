@@ -1194,6 +1194,11 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if ipnsPath == "" || ipnsPath == "/" {
+		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
+		return
+	}
+
 	// Remove trailing slash from ipnsPath if it exists
 	// Otherwise directories won't be removed
 	ipnsPath = strings.TrimRight(ipnsPath, "/")
