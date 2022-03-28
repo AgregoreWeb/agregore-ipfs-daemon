@@ -864,6 +864,9 @@ func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (cid
 // addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
 // It returns false if an error was sent to the user.
 //
+// If pin is true then the individual files will be pinned. Pinning the returned
+// directory CID or not is up to the caller.
+//
 // subdir can be "" or "/" to add files to the root.
 func (i *gatewayHandler) addFilesFromForm(
 	w http.ResponseWriter, r *http.Request,
@@ -931,13 +934,26 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, shouldPin)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
 		}
 		// Convert to CIDv1 first if needed
 		cidStr = getV1(newCid).String()
+
+		if shouldPin {
+			// Pin dir
+			err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+			if err != nil {
+				// Set header so CID is known to client and can be used, or pinning
+				// can be tried again
+				w.Header().Set("IPFS-Hash", cidStr)
+				webError(w, "WritableGateway: failed to pin directory of files", err,
+					http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -967,7 +983,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 
 	shouldPin := r.Header.Get(pinHeader) != ""
 
-	var cidStr string
+	var newCid cid.Cid
 
 	if mpr == nil {
 		// Add just a single file to the directory
@@ -977,23 +993,37 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 			// Sending error to client is handled in the func
 			return
 		}
-		if ok := i.addFileToDir(w, r, root, newPath, r.Body, shouldPin); !ok {
+		if ok := i.addFileToDir(w, r, root, newPath, r.Body, false); !ok {
 			return
 		}
-		ncid, ok := i.finalizeDir(w, root)
+		newCid, ok = i.finalizeDir(w, root)
 		if !ok {
 			return
 		}
-		cidStr = getV1(ncid).String()
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, rootCid, newPath, mpr, shouldPin)
+		var ok bool
+		newCid, ok = i.addFilesFromForm(w, r, rootCid, newPath, mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
 		}
-		cidStr = getV1(newCid).String()
+	}
+
+	cidStr := getV1(newCid).String()
+
+	if shouldPin {
+		// Pin dir
+		err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+		if err != nil {
+			// Set header so CID is known to client and can be used, or pinning
+			// can be tried again
+			w.Header().Set("IPFS-Hash", cidStr)
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -1062,9 +1092,21 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if newPath == "" || newPath == "/" {
-		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
+		// Unpin the CID instead of removing any files.
+
+		err := i.api.Pin().Rm(r.Context(), ipath.IpfsPath(rootCid))
+		if err != nil {
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
+		// Success
+		i.addUserHeaders(w)
+		w.Header().Set("IPFS-Hash", getV1(rootCid).String())
 		return
 	}
+
+	shouldPin := r.Header.Get(pinHeader) != ""
 
 	root, ok := i.rootFromCid(w, r, rootCid)
 	if !ok {
@@ -1073,11 +1115,24 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	if !i.removePathFromDir(w, r, root, newPath) {
 		return
 	}
-	ncid, ok := i.finalizeDir(w, root)
+	newCid, ok := i.finalizeDir(w, root)
 	if !ok {
 		return
 	}
-	cidStr := getV1(ncid).String()
+	cidStr := getV1(newCid).String()
+
+	if shouldPin {
+		// Pin dir
+		err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+		if err != nil {
+			// Set header so CID is known to client and can be used, or pinning
+			// can be tried again
+			w.Header().Set("IPFS-Hash", cidStr)
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
+	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
