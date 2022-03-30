@@ -239,3 +239,7 @@ require (
 )
 
 replace github.com/ipfs/go-ipfs => ./go-ipfs
+
+replace github.com/libp2p/go-libp2p-kad-dht => ./go-libp2p-kad-dht
+
+replace github.com/ipfs/go-namesys => ./go-namesys

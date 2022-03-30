@@ -1041,6 +1041,8 @@ func (sc *stringsCloser) Close() error {
 }
 
 func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -1080,6 +1082,9 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	r.Body = &stringsCloser{strings.NewReader(cidStr), func() error { return r.Body.Close() }}
+
+	golog.Println("ipnsPutHandler", time.Since(start))
+
 	i.ipnsPostHandler(w, r)
 }
 
@@ -1330,6 +1335,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Create key if needed
+	hadKey := true
 	if keyFromPath == "" {
 		has, err := i.keystore.Has(keyName)
 		if err != nil {
@@ -1337,6 +1343,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if !has {
+			hadKey = false
 			// Generate key with name
 			_, err = i.api.Key().Generate(r.Context(), keyName)
 			if err != nil {
@@ -1377,16 +1384,28 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		keyStr = keyEnc.FormatID(pid)
 	}
 
+	start := time.Now()
+
 	// Get current IPFS path and CID
-	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
 	var resolvedCid cid.Cid
-	if err == nil {
-		segs := strings.Split(resolvedPath.String(), "/")
-		resolvedCid = cidMustDecode(segs[2])
+	if hadKey {
+		// Key already existed, try to resolve
+
+		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+
+		golog.Println("resolve time", time.Since(start))
+
+		if err == nil {
+			segs := strings.Split(resolvedPath.String(), "/")
+			resolvedCid = cidMustDecode(segs[2])
+		} else {
+			// Path couldn't be resolved
+			// This probably means that it doesn't exist
+			// So create it, using the empty dir CID
+			resolvedCid = emptyDirCid
+		}
 	} else {
-		// Path couldn't be resolved
-		// This probably means that it doesn't exist
-		// So create it, using the empty dir CID
+		// Key was just created, don't waste time trying to resolve
 		resolvedCid = emptyDirCid
 	}
 
@@ -1396,6 +1415,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	if ipnsPath == "" {
 		// Root is being replaced, so the provided /ipfs/ path can just be published
 
+		start = time.Now()
+
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.New(bodyPath),
 			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
@@ -1404,6 +1425,9 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
 			return
 		}
+
+		golog.Println("publish time", time.Since(start))
+
 		newCid = inCid
 	} else {
 		// A subpath of the IPNS dir is being replaced
@@ -1438,6 +1462,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	// Successfully published new path
 	// Pin content and unpin old
 
+	start = time.Now()
+
 	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
 	if err != nil {
 		webError(w, "WritableGateway: name published but failed to pin new content", err,
@@ -1453,6 +1479,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+
+	golog.Println("pin and unpin time", time.Since(start))
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
