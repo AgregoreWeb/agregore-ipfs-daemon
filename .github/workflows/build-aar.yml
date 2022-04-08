@@ -1,0 +1,23 @@
+name: "Build AAR with docker"
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE*"
+    branches:
+      - "main"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: docker run
+      - run: docker run --rm -v "$PWD":/module makeworld/gomobile-android:latest bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_"$GITHUB_SHA".aar ./gateway
+      - name: Upload assets
+        uses: actions/upload-artifact@v3
+        with:
+          name: AAR
+          path: agregore-ipfs-daemon_"$GITHUB_SHA".aar
