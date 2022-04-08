@@ -12,12 +12,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: "See env vars"
-        run: |
-          echo ${GITHUB_SHA}
-          echo "$GITHUB_SHA"
-          echo "${GITHUB_SHA}"
-
       - name: Checkout
         uses: actions/checkout@v3
 
@@ -47,6 +41,15 @@ jobs:
 
       - name: docker run
         run: docker run --rm -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
+
+      - name: Inspect files
+        run: |
+          echo $?
+          set -x
+          pwd
+          echo ${GITHUB_WORKSPACE}
+          ls -l
+          ls -l ${GITHUB_WORKSPACE}
 
       - name: Upload assets
         uses: actions/upload-artifact@v3
