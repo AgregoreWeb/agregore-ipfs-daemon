@@ -29,6 +29,16 @@ jobs:
           path: ~/image-cache
           key: image-cache-${{ steps.get-digest.outputs.digest }}
 
+      - name: Load Go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-
+
       - name: Download image if cache is outdated
         if: steps.image-cache.outputs.cache-hit != 'true'
         run: |
@@ -40,7 +50,7 @@ jobs:
         run: docker load -i ~/image-cache/gomobile-android.tar
 
       - name: docker run
-        run: docker run --rm -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
+        run: docker run --rm -v ${GITHUB_WORKSPACE}:/module -v ~/go/pkg/mod:/go/pkg/mod makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
 
       - name: Upload assets
         uses: actions/upload-artifact@v3
