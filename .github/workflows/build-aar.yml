@@ -12,8 +12,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: "See env vars"
+        run: env
+
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - run: mkdir -p ~/image-cache
       - name: Get digest
@@ -29,16 +32,18 @@ jobs:
           path: ~/image-cache
           key: image-cache-${{ steps.get-digest.outputs.digest }}
 
-      - if: steps.image-cache.outputs.cache-hit != 'true'
+      - name: Download image if cache is outdated
+        if: steps.image-cache.outputs.cache-hit != 'true'
         run: |
           docker pull makeworld/gomobile-android:latest
           docker save -o ~/image-cache/gomobile-android.tar makeworld/gomobile-android
 
-      - if: steps.image-cache.outputs.cache-hit == 'true'
+      - name: Use cache if current
+        if: steps.image-cache.outputs.cache-hit == 'true'
         run: docker load -i ~/image-cache/gomobile-android.tar
 
       - name: docker run
-        run: docker run --rm -v "$PWD":/module makeworld/gomobile-android:latest bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
+        run: docker run --rm -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
 
       - name: Upload assets
         uses: actions/upload-artifact@v3
