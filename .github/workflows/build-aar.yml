@@ -13,7 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "See env vars"
-        run: env
+        run: |
+          echo ${GITHUB_SHA}
+          echo "$GITHUB_SHA"
+          echo "${GITHUB_SHA}"
 
       - name: Checkout
         uses: actions/checkout@v3
