@@ -55,5 +55,5 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: AAR
-          path: agregore-ipfs-daemon_${GITHUB_SHA}.aar
+          path: agregore-ipfs-daemon_*.aar
           if-no-files-found: error
