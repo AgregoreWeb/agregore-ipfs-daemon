@@ -14,10 +14,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+
+      - run: mkdir -p ~/image-cache
+      - name: Get digest
+        id: get-digest
+        run: |
+          echo "::set-output name=digest::$(docker manifest inspect makeworld/gomobile-android:latest -v | jq -r '.Descriptor.digest' | cut -d: -f2)"
+        shell: bash
+
+      - name: Load image cache
+        id: image-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/image-cache
+          key: image-cache-${{ steps.get-digest.outputs.digest }}
+
+      - if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull makeworld/gomobile-android:latest
+          docker save -o ~/image-cache/gomobile-android.tar makeworld/gomobile-android
+
+      - if: steps.image-cache.outputs.cache-hit == 'true'
+        run: docker load -i ~/image-cache/gomobile-android.tar
+
       - name: docker run
-        run: docker run --rm -v "$PWD":/module makeworld/gomobile-android:latest bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_"$GITHUB_SHA".aar ./gateway
+        run: docker run --rm -v "$PWD":/module makeworld/gomobile-android:latest bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
+
       - name: Upload assets
         uses: actions/upload-artifact@v3
         with:
           name: AAR
-          path: agregore-ipfs-daemon_"$GITHUB_SHA".aar
+          path: agregore-ipfs-daemon_${GITHUB_SHA}.aar
+          if-no-files-found: error
