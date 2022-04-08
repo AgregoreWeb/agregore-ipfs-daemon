@@ -1,5 +1,6 @@
+*.jar
+*.aar
 spec.md
-
 agregore-ipfs-daemon
 example-folder
 dist/
