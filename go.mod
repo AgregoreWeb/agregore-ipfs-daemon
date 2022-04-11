@@ -3,7 +3,7 @@ module github.com/AgregoreWeb/agregore-ipfs-daemon
 go 1.17
 
 require (
-	github.com/ipfs/go-ipfs v0.12.0
+	github.com/ipfs/go-ipfs v0.12.2
 	github.com/ipfs/go-ipfs-config v0.18.0
 	github.com/ipfs/go-ipfs-files v0.0.9
 	github.com/ipfs/interface-go-ipfs-core v0.5.2
@@ -105,7 +105,7 @@ require (
 	github.com/ipfs/go-verifcid v0.0.1 // indirect
 	github.com/ipfs/tar-utils v0.0.2 // indirect
 	github.com/ipld/go-car v0.3.2 // indirect
-	github.com/ipld/go-codec-dagpb v1.3.0 // indirect
+	github.com/ipld/go-codec-dagpb v1.3.2 // indirect
 	github.com/ipld/go-ipld-prime v0.14.2 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
