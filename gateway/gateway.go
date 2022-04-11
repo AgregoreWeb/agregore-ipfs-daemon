@@ -39,8 +39,15 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
-// Error channels that need to be tracked
-var errChs = make([]<-chan error, 0)
+var (
+	// Error channels that need to be tracked
+	errChs = make([]<-chan error, 0)
+
+	// Stop uses this to stop Run
+	stopCh = make(chan struct{})
+	// Used to respond to Stop
+	stoppedCh = make(chan struct{})
+)
 
 /// ------ Setting up the IPFS Repo
 
@@ -325,6 +332,8 @@ func Run(repoPath string, ifaceAddrs string) int {
 	case sig := <-sigs:
 		log.Printf("terminating due to signal: %v", sig)
 		exitCode = 1
+	case <-stopCh:
+		log.Printf("stopping because Stop() was called")
 	}
 
 	// There was an error, shut things down
@@ -336,7 +345,19 @@ func Run(repoPath string, ifaceAddrs string) int {
 	time.Sleep(2 * time.Second)
 	log.Println("stopped")
 
+	if exitCode == 0 {
+		// Stop was why this happened, so send back a response to let it know
+		// the daemon is done
+		stoppedCh <- struct{}{}
+	}
+
 	return exitCode
+}
+
+// Stop stops the daemon within over 2 seconds. It does a graceful shutdown.
+func Stop() {
+	stopCh <- struct{}{}
+	<-stoppedCh
 }
 
 // merge does fan-in of multiple read-only error channels
