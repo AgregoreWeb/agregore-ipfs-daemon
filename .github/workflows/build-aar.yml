@@ -1,0 +1,76 @@
+name: "Build AAR with docker"
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE*"
+    branches:
+      - "main"
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - run: mkdir -p ~/image-cache
+      - name: Get digest
+        id: get-digest
+        run: |
+          echo "::set-output name=digest::$(docker manifest inspect makeworld/gomobile-android:latest -v | jq -r '.Descriptor.digest' | cut -d: -f2)"
+        shell: bash
+
+      - name: Load image cache
+        id: image-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/image-cache
+          key: image-cache-${{ steps.get-digest.outputs.digest }}
+
+      - name: Download image if cache is outdated
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull makeworld/gomobile-android:latest
+          docker save -o ~/image-cache/gomobile-android.tar makeworld/gomobile-android
+
+      - name: Use cache if current
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: docker load -i ~/image-cache/gomobile-android.tar
+
+      - name: Commit or tag?
+        id: commit-tag
+        run: |
+          if [[ ${{ startsWith(github.ref, 'refs/tags/') }} == 'true' ]]; then
+              echo "::set-output name=ver::"
+          else
+              echo "::set-output name=ver::${GITHUB_SHA}"
+          fi
+
+      - name: docker run
+        run: |
+          docker run -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android \
+          bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs \
+          -o agregore-ipfs-daemon_${{ steps.commit-tag.outputs.ver }}.aar \
+          ./gateway
+
+      - name: Upload artifact
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v3
+        with:
+          name: AAR
+          path: agregore-ipfs-daemon_*.aar
+          if-no-files-found: error
+
+      - name: Rename for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: mv agregore-ipfs-daemon_.aar agregore-ipfs-daemon.aar
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: agregore-ipfs-daemon.aar
