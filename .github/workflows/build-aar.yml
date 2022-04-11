@@ -39,12 +39,32 @@ jobs:
         if: steps.image-cache.outputs.cache-hit == 'true'
         run: docker load -i ~/image-cache/gomobile-android.tar
 
-      - name: docker run
-        run: docker run --rm -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon_${GITHUB_SHA}.aar ./gateway
+      - name: Commit, not tag
+        id: commit-tag
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        run: echo "::set-output name=ver::${GITHUB_SHA}"
+      - name: Tag, not commit
+        id: commit-tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "::set-output name=ver::${GITHUB_REF_NAME}"
 
-      - name: Upload assets
+      - name: docker run
+        run: |
+          docker run -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android \
+          bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs \
+          -o agregore-ipfs-daemon_${{ steps.commit-tag.outputs.ver }}.aar \
+          ./gateway
+
+      - name: Upload artifact
+        if: "!startsWith(github.ref, 'refs/tags/')"
         uses: actions/upload-artifact@v3
         with:
           name: AAR
           path: agregore-ipfs-daemon_*.aar
           if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: agregore-ipfs-daemon_*.aar
