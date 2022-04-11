@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -34,6 +35,8 @@ import (
 	"github.com/ipfs/go-ipfs/plugin/loader" // This package is needed so that all the preloaded plugins are loaded automatically
 	"github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/libp2p/go-libp2p-core/peer"
+
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 // Error channels that need to be tracked
@@ -267,8 +270,23 @@ func getUnixfsNode(path string) (files.Node, error) {
 // has stopped.
 //
 // repoPath is a path to a directory for the IPFS repo. It doesn't need to exist.
-func Run(repoPath string) int {
+// interfaces is a newline-delimited list of network interface definitions.
+// It is only needed on Android. See interface_addrs.java for code of how this
+// string is generated.
+func Run(repoPath string, ifaceAddrs string) int {
 	log.Println("started")
+
+	if runtime.GOOS == "android" {
+		log.Println("OS: Android")
+		// Use interface addrs sent in from Java
+		// This allow mDNS to work, because otherwise libp2p will try to make
+		// a call to find out the addrs. That call is not allowed for Android
+		// SDK 30+ and will cause an error.
+		// https://github.com/golang/go/issues/40569
+		manet.SetNetInterface(&inet{parseInterfaceString(ifaceAddrs)})
+	} else {
+		log.Printf("OS: Not Android (%s)", runtime.GOOS)
+	}
 
 	// Shared context for all IPFS node stuff
 	ctx, cancel := context.WithCancel(context.Background())
