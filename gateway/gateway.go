@@ -272,15 +272,20 @@ func getUnixfsNode(path string) (files.Node, error) {
 
 /// -------
 
-// Run starts up the daemon, and returns an exit code greater than 0 if there
-// are any errors. It does not return unless there is an error and the daemon
-// has stopped.
+// Run starts up the daemon and returns immediately.
 //
 // repoPath is a path to a directory for the IPFS repo. It doesn't need to exist.
 // interfaces is a newline-delimited list of network interface definitions.
 // It is only needed on Android. See interface_addrs.java for code of how this
 // string is generated.
-func Run(repoPath string, ifaceAddrs string) int {
+func Run(repoPath string, ifaceAddrs string) {
+	go RunSynchronous(repoPath, ifaceAddrs)
+}
+
+// RunSynchronous is like Run but returns an exit code greater than 0 if there
+// are any errors. It does not return unless there is an error and the daemon
+// has stopped.
+func RunSynchronous(repoPath string, ifaceAddrs string) int {
 	log.Println("started")
 
 	if runtime.GOOS == "android" {
