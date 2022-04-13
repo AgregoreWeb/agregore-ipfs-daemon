@@ -1426,7 +1426,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		golog.Println("publish time", time.Since(start))
+		golog.Println("overall publish time", time.Since(start))
 
 		newCid = inCid
 	} else {
