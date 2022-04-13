@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	golog "log"
 	"sync"
 	"time"
 
@@ -29,6 +30,8 @@ import (
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+	start := time.Now()
+	defer golog.Println("IpfsDHT.PutValue", time.Since(start))
 
 	if !dht.enableValues {
 		return routing.ErrNotSupported
