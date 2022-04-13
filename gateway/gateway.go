@@ -47,6 +47,8 @@ var (
 	stopCh = make(chan struct{})
 	// Used to respond to Stop
 	stoppedCh = make(chan struct{})
+
+	running = false
 )
 
 /// ------ Setting up the IPFS Repo
@@ -286,6 +288,9 @@ func Run(repoPath string, ifaceAddrs string) {
 // are any errors. It does not return unless there is an error and the daemon
 // has stopped.
 func RunSynchronous(repoPath string, ifaceAddrs string) int {
+	running = true
+	defer func() { running = false }()
+
 	log.Println("started")
 
 	if runtime.GOOS == "android" {
@@ -363,6 +368,11 @@ func RunSynchronous(repoPath string, ifaceAddrs string) int {
 func Stop() {
 	stopCh <- struct{}{}
 	<-stoppedCh
+}
+
+// IsRunning returns a bool indicating whether the daemon is running.
+func IsRunning() bool {
+	return running
 }
 
 // merge does fan-in of multiple read-only error channels
