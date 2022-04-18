@@ -3,7 +3,7 @@
 **Work in progress**
 
 
-The [go-ipfs](./go-ipfs/) directory is forked from [go-ipfs v0.12.2](https://github.com/ipfs/go-ipfs/tree/v0.12.2), but the important part are the changes in [gateway_handler.go](./go-ipfs/core/corehttp/gateway_handler.go).
+The [go-ipfs](./go-ipfs/) directory is forked from [go-ipfs v0.12.2](https://github.com/ipfs/go-ipfs/tree/v0.12.2), but the important part are the changes in [gateway_handler.go](./go-ipfs/core/corehttp/gateway_handler.go) and [pubsub.go](./go-ipfs/core/corehttp/pubsub.go).
 
 
 ## Build

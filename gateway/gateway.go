@@ -319,7 +319,7 @@ func RunSynchronous(repoPath string, ifaceAddrs string) int {
 	// Start gateway
 
 	opts := []corehttp.ServeOption{
-		corehttp.GatewayOption(true, "/ipfs", "/ipns"),
+		corehttp.GatewayOption(true, "/ipfs", "/ipns", "/pubsub"),
 	}
 	gatewayAddr, _ := node.Repo.GetConfigKey("Addresses.Gateway")
 	gatewayErrC := make(chan error)
