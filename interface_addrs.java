@@ -12,24 +12,30 @@ https://github.com/tailscale/tailscale-android/blob/51fc2e7030191d08b434758dbd70
 import java.net.NetworkInterface;
 import java.lang.StringBuilder;
 import java.util.Collections;
+import java.net.SocketException;
+import java.net.InterfaceAddress;
 
 public class Example {
 
     String getInterfaceAddrs() {
         StringBuilder sb = new StringBuilder("");
-        for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            try {
-                for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
-                   String[] parts = ia.toString().split("/", 0);
-                    if (parts.length > 1) {
-                        sb.append(parts[1]);
-                        sb.append("\n");
+        try {
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                try {
+                    for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
+                       String[] parts = ia.toString().split("/", 0);
+                        if (parts.length > 1) {
+                            sb.append(parts[1]);
+                            sb.append("\n");
+                        }
                     }
+                } catch (Exception e) {
+                    // TODO should log the exception not silently suppress it.
+                    continue;
                 }
-            } catch (Exception e) {
-                // TODO should log the exception not silently suppress it.
-                continue;
             }
+        } catch (SocketException e) {
+            // TODO: log
         }
         return sb.toString();
     }
