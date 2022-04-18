@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -301,6 +302,23 @@ func RunSynchronous(repoPath string, ifaceAddrs string) int {
 		// SDK 30+ and will cause an error.
 		// https://github.com/golang/go/issues/40569
 		manet.SetNetInterface(&inet{parseInterfaceString(ifaceAddrs)})
+
+		// Fix DNS on Android
+		// Issue: https://github.com/golang/go/issues/8877
+		// Fix adapted from: https://github.com/v2fly/v2ray-core/commit/3eb13868f269329715df32bc264b1b13ff92e46c#diff-46b1badb1d91963451e2c3b814292730fe7621fedd1c84fd40d21fbf2035a5f4
+
+		var dialer net.Dialer
+		net.DefaultResolver = &net.Resolver{
+			PreferGo: false,
+			Dial: func(context context.Context, _, _ string) (net.Conn, error) {
+				conn, err := dialer.DialContext(context, "udp", "1.1.1.1:53")
+				if err != nil {
+					return nil, err
+				}
+				return conn, nil
+			},
+		}
+
 	} else {
 		log.Printf("OS: Not Android (%s)", runtime.GOOS)
 	}
