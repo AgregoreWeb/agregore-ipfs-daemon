@@ -83,7 +83,7 @@ jobs:
           name: AAR
           path: |
             agregore-ipfs-daemon*.aar
-            agregore-ipfs-daemon_*
+            agregore-ipfs-daemon_*amd64*
           if-no-files-found: error
 
       - name: Release
@@ -92,4 +92,4 @@ jobs:
         with:
           files: |
             agregore-ipfs-daemon*.aar
-            agregore-ipfs-daemon_*
+            agregore-ipfs-daemon_*amd64*
