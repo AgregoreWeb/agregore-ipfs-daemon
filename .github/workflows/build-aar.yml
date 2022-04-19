@@ -57,7 +57,19 @@ jobs:
           -o agregore-ipfs-daemon${{ steps.commit-tag.outputs.ver }}.aar \
           ./gateway
 
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-
+
       - name: Desktop builds
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.17.8"
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64   go build -o agregore-ipfs-daemon_linux_amd64${{ steps.commit-tag.outputs.ver }}
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o agregore-ipfs-daemon_windows_amd64${{ steps.commit-tag.outputs.ver }}.exe
