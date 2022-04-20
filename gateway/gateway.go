@@ -298,7 +298,7 @@ func RunSynchronous(repoPath string, interfaces string) int {
 	if runtime.GOOS == "android" {
 		log.Println("OS: Android")
 
-		////////////////////////////////
+		/////////////////////////////////
 
 		// Use interface addrs sent in from Java
 		// This allow mDNS to work, because otherwise libp2p will try to make
