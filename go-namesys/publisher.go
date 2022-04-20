@@ -150,8 +150,11 @@ func (p *IpnsPublisher) updateRecord(ctx context.Context, k crypto.PrivKey, valu
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	start := time.Now()
+
 	// get previous records sequence number
-	rec, err := p.GetPublished(ctx, id, true)
+	rec, err := p.GetPublished(ctx, id, false)
+	golog.Println("updateRecord: p.GetPublished", time.Since(start))
 	if err != nil {
 		return nil, err
 	}
