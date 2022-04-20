@@ -279,16 +279,16 @@ func getUnixfsNode(path string) (files.Node, error) {
 //
 // repoPath is a path to a directory for the IPFS repo. It doesn't need to exist.
 // interfaces is a newline-delimited list of network interface definitions.
-// It is only needed on Android. See interface_addrs.java for code of how this
+// It is only needed on Android. See get_interfaces.java for code of how this
 // string is generated.
-func Run(repoPath string, ifaceAddrs string) {
-	go RunSynchronous(repoPath, ifaceAddrs)
+func Run(repoPath string, interfaces string) {
+	go RunSynchronous(repoPath, interfaces)
 }
 
 // RunSynchronous is like Run but returns an exit code greater than 0 if there
 // are any errors. It does not return unless there is an error and the daemon
 // has stopped.
-func RunSynchronous(repoPath string, ifaceAddrs string) int {
+func RunSynchronous(repoPath string, interfaces string) int {
 	running = true
 	defer func() { running = false }()
 
@@ -297,17 +297,32 @@ func RunSynchronous(repoPath string, ifaceAddrs string) int {
 	if runtime.GOOS == "android" {
 		log.Println("OS: Android")
 
-		if ifaceAddrs == "" {
-			log.Println("ifaceAddrs is an empty string!")
-			return 1
-		}
+		////////////////////////////////
 
 		// Use interface addrs sent in from Java
 		// This allow mDNS to work, because otherwise libp2p will try to make
 		// a call to find out the addrs. That call is not allowed for Android
 		// SDK 30+ and will cause an error.
 		// https://github.com/golang/go/issues/40569
-		manet.SetNetInterface(&inet{parseInterfaceString(ifaceAddrs)})
+
+		if interfaces == "" {
+			log.Println("interfaces is an empty string!")
+			return 1
+		}
+
+		// Parse interfaces and put into android* vars
+		parseInterfacesString(interfaces)
+
+		// libp2p calls for interfaces from manet
+		// Pass in addrs manually using forked version of manet
+		manet.SetNetInterface(&inet{androidAddrs})
+
+		// libp2p also calls for interfaces when setting up mDNS
+		// So mDNS is disabled in IPFS and a modified version of the service
+		// (where interfaces are passed in manually) is started up
+		// Has to be done down below though
+
+		////////////////////////////////
 
 		// Fix DNS on Android
 		// Issue: https://github.com/golang/go/issues/8877
@@ -332,15 +347,24 @@ func RunSynchronous(repoPath string, ifaceAddrs string) int {
 	// Shared context for all IPFS node stuff
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ipfs, node, err := spawnNode(ctx, repoPath)
+	_, node, err := spawnNode(ctx, repoPath)
 	if err != nil {
 		log.Printf("failed to spawn node: %s", err)
 		cancel() // Linter
 		return 1
 	}
-	_ = ipfs
 
 	log.Println("IPFS node is running")
+
+	if runtime.GOOS == "android" {
+		// Start up mDNS service manually, see above for why
+		err := startMdnsService(androidInterfaces, node.PeerHost)
+		if err != nil {
+			log.Println("stopping due to mdns service error")
+			cancel() // Linter
+			return 1
+		}
+	}
 
 	// Start gateway
 
