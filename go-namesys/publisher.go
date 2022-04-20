@@ -201,7 +201,7 @@ func (p *IpnsPublisher) PublishWithEOL(ctx context.Context, k crypto.PrivKey, va
 	}
 
 	start = time.Now()
-	defer golog.Println("PublishWithEOL: PutRecordToRouting", time.Since(start))
+	defer func() { golog.Println("PublishWithEOL: PutRecordToRouting", time.Since(start)) }()
 	return PutRecordToRouting(ctx, p.routing, k.GetPublic(), record)
 }
 

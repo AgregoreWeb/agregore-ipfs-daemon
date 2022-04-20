@@ -31,7 +31,7 @@ import (
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
 	start := time.Now()
-	defer golog.Println("IpfsDHT.PutValue", time.Since(start))
+	defer func() { golog.Println("IpfsDHT.PutValue", time.Since(start)) }()
 
 	if !dht.enableValues {
 		return routing.ErrNotSupported
@@ -69,13 +69,47 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	peers, err := dht.GetClosestPeers(ctx, key)
+	start2 := time.Now()
+	peers, err := dht.GetClosestPeers(ctx, key, true)
+	golog.Println("IpfsDHT.PutValue: dht.GetClosestPeers", time.Since(start2))
 	if err != nil {
 		return err
 	}
 
+	// Changes by makeworld to make PutValue return quicker, speeding up IPNS
+	// name publish operations
+	// Only publish to 5 out of 20 peers synchronously, the rest async
+
+	syncN := 5
+	if len(peers) < syncN {
+		// peers is always 20, but this is just in case
+		syncN = len(peers)
+	}
+
+	// Start async puts
+	if syncN < len(peers) {
+		for _, p := range peers[syncN:] {
+			go func(p peer.ID) {
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.Value,
+					ID:   p,
+				})
+
+				err := dht.protoMessenger.PutValue(ctx, p, rec)
+				if err != nil {
+					logger.Debugf("failed putting value to peer: %s", err)
+				}
+			}(p)
+		}
+	}
+
+	start3 := time.Now()
+
+	// Synchronous puts
 	wg := sync.WaitGroup{}
-	for _, p := range peers {
+	for _, p := range peers[:syncN] {
 		wg.Add(1)
 		go func(p peer.ID) {
 			ctx, cancel := context.WithCancel(ctx)
@@ -93,6 +127,8 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		}(p)
 	}
 	wg.Wait()
+
+	golog.Println("IpfsDHT.PutValue: sync puts", time.Since(start3))
 
 	return nil
 }

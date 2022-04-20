@@ -16,7 +16,11 @@ import (
 //
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
-func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
+//
+// makeworld: noFollowup added to provide a way to disable following up with peers,
+// because it takes so much time. Just include a bool, ideally true because it
+// makes more sense, and there won't be a follow up.
+func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string, noFollowup ...bool) ([]peer.ID, error) {
 	if key == "" {
 		return nil, fmt.Errorf("can't lookup empty key")
 	}
@@ -45,6 +49,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 			return peers, err
 		},
 		func() bool { return false },
+		noFollowup...,
 	)
 
 	if err != nil {

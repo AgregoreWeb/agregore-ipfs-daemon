@@ -76,7 +76,10 @@ type lookupWithFollowupResult struct {
 //
 // After the lookup is complete the query function is run (unless stopped) against all of the top K peers from the
 // lookup that have not already been successfully queried.
-func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+//
+// makeworld: noFollowup added to provide a way to disable following up with peers, because it takes so much time.
+// Just include a bool, ideally true because it makes more sense, and there won't be a follow up.
+func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, noFollowup ...bool) (*lookupWithFollowupResult, error) {
 	// run the query
 	lookupRes, err := dht.runQuery(ctx, target, queryFn, stopFn)
 	if err != nil {
@@ -113,6 +116,10 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, qu
 			_, _ = queryFn(followUpCtx, qp)
 			doneCh <- struct{}{}
 		}()
+	}
+
+	if len(noFollowup) > 0 {
+		return lookupRes, nil
 	}
 
 	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped

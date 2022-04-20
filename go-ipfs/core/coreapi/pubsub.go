@@ -48,7 +48,7 @@ func (api *PubSubAPI) Peers(ctx context.Context, opts ...caopts.PubSubPeersOptio
 
 func (api *PubSubAPI) Publish(ctx context.Context, topic string, data []byte) error {
 	start := time.Now()
-	defer golog.Println("pubsub.go Publish", time.Since(start))
+	defer func() { golog.Println("pubsub.go Publish", time.Since(start)) }()
 
 	_, err := api.checkNode()
 	if err != nil {

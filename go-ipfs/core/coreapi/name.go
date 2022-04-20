@@ -38,7 +38,7 @@ func (e *ipnsEntry) Value() path.Path {
 // Publish announces new IPNS name and returns the new IPNS entry.
 func (api *NameAPI) Publish(ctx context.Context, p path.Path, opts ...caopts.NamePublishOption) (coreiface.IpnsEntry, error) {
 	start := time.Now()
-	defer golog.Println("name.go Publish", time.Since(start))
+	defer func() { golog.Println("name.go Publish", time.Since(start)) }()
 
 	if err := api.checkPublishAllowed(); err != nil {
 		return nil, err
