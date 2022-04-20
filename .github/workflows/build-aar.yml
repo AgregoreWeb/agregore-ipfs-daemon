@@ -47,30 +47,49 @@ jobs:
           if [[ ${{ startsWith(github.ref, 'refs/tags/') }} == 'true' ]]; then
               echo "::set-output name=ver::"
           else
-              echo "::set-output name=ver::${GITHUB_SHA}"
+              echo "::set-output name=ver::_${GITHUB_SHA}"
           fi
 
       - name: docker run
         run: |
           docker run -v ${GITHUB_WORKSPACE}:/module makeworld/gomobile-android \
           bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs \
-          -o agregore-ipfs-daemon_${{ steps.commit-tag.outputs.ver }}.aar \
+          -o agregore-ipfs-daemon${{ steps.commit-tag.outputs.ver }}.aar \
           ./gateway
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.17.8"
+
+      - name: Desktop builds
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64   go build -o agregore-ipfs-daemon_linux_amd64${{ steps.commit-tag.outputs.ver }}
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o agregore-ipfs-daemon_windows_amd64${{ steps.commit-tag.outputs.ver }}.exe
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64  go build -o agregore-ipfs-daemon_macos_amd64${{ steps.commit-tag.outputs.ver }}
 
       - name: Upload artifact
         if: "!startsWith(github.ref, 'refs/tags/')"
         uses: actions/upload-artifact@v3
         with:
           name: AAR
-          path: agregore-ipfs-daemon_*.aar
+          path: |
+            agregore-ipfs-daemon*.aar
+            agregore-ipfs-daemon_*amd64*
           if-no-files-found: error
-
-      - name: Rename for release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: mv agregore-ipfs-daemon_.aar agregore-ipfs-daemon.aar
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: agregore-ipfs-daemon.aar
+          files: |
+            agregore-ipfs-daemon*.aar
+            agregore-ipfs-daemon_*amd64*
