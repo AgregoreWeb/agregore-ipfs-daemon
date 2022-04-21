@@ -688,6 +688,8 @@ func (i *gatewayHandler) rootFromCid(w http.ResponseWriter, r *http.Request, roo
 // addFileToDir adds a file to an existing MFS root. It returns false if
 // an error was sent to the user. Call finalizeDir after all files are added,
 // to make sure they've been added succesfully.
+//
+// path can begin with a slash but doesn't have to.
 func (i *gatewayHandler) addFileToDir(
 	w http.ResponseWriter, r *http.Request,
 	root *mfs.Root, path string, file io.ReadCloser, pin bool) bool {
@@ -717,6 +719,9 @@ func (i *gatewayHandler) addFileToDir(
 	// Patch the file into the root
 
 	newDirectory, newFileName := gopath.Split(path)
+
+	// Shouldn't begin with slash
+	newDirectory = strings.TrimLeft(newDirectory, "/")
 
 	if newDirectory != "" {
 		err := mfs.Mkdir(root, newDirectory, mfs.MkdirOpts{Mkparents: true, Flush: false})
@@ -858,9 +863,14 @@ func (i *gatewayHandler) finalizeDir(w http.ResponseWriter, root *mfs.Root) (cid
 
 // addFilesFromForm reads from multipart form data, and adds those files to an existing directory.
 // It returns false if an error was sent to the user.
+//
+// If pin is true then the individual files will be pinned. Pinning the returned
+// directory CID or not is up to the caller.
+//
+// subdir can be "" or "/" to add files to the root.
 func (i *gatewayHandler) addFilesFromForm(
 	w http.ResponseWriter, r *http.Request,
-	dir cid.Cid, mpr *multipart.Reader, pin bool) (cid.Cid, bool) {
+	dir cid.Cid, subdir string, mpr *multipart.Reader, pin bool) (cid.Cid, bool) {
 
 	// Get dir
 	root, ok := i.rootFromCid(w, r, dir)
@@ -884,7 +894,7 @@ func (i *gatewayHandler) addFilesFromForm(
 			continue
 		}
 
-		if ok := i.addFileToDir(w, r, root, part.FileName(), part, pin); !ok {
+		if ok := i.addFileToDir(w, r, root, gopath.Join(subdir, part.FileName()), part, pin); !ok {
 			return cid.Cid{}, false
 		}
 	}
@@ -924,13 +934,26 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, shouldPin)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
 		}
 		// Convert to CIDv1 first if needed
 		cidStr = getV1(newCid).String()
+
+		if shouldPin {
+			// Pin dir
+			err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+			if err != nil {
+				// Set header so CID is known to client and can be used, or pinning
+				// can be tried again
+				w.Header().Set("IPFS-Hash", cidStr)
+				webError(w, "WritableGateway: failed to pin directory of files", err,
+					http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -960,7 +983,7 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 
 	shouldPin := r.Header.Get(pinHeader) != ""
 
-	var cidStr string
+	var newCid cid.Cid
 
 	if mpr == nil {
 		// Add just a single file to the directory
@@ -970,23 +993,37 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 			// Sending error to client is handled in the func
 			return
 		}
-		if ok := i.addFileToDir(w, r, root, newPath, r.Body, shouldPin); !ok {
+		if ok := i.addFileToDir(w, r, root, newPath, r.Body, false); !ok {
 			return
 		}
-		ncid, ok := i.finalizeDir(w, root)
+		newCid, ok = i.finalizeDir(w, root)
 		if !ok {
 			return
 		}
-		cidStr = getV1(ncid).String()
 	} else {
 		// Add multiple files from the form data
 
-		newCid, ok := i.addFilesFromForm(w, r, rootCid, mpr, shouldPin)
+		var ok bool
+		newCid, ok = i.addFilesFromForm(w, r, rootCid, newPath, mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
 		}
-		cidStr = getV1(newCid).String()
+	}
+
+	cidStr := getV1(newCid).String()
+
+	if shouldPin {
+		// Pin dir
+		err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+		if err != nil {
+			// Set header so CID is known to client and can be used, or pinning
+			// can be tried again
+			w.Header().Set("IPFS-Hash", cidStr)
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -1027,7 +1064,7 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 		// Add multiple files from the form data
 
 		// Don't pin because ipnsPostHandler will pin later if everything is successful
-		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, mpr, false)
+		newCid, ok := i.addFilesFromForm(w, r, emptyDirCid, "", mpr, false)
 		if !ok {
 			// Sending error to client is handled in the func
 			return
@@ -1055,9 +1092,21 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if newPath == "" || newPath == "/" {
-		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
+		// Unpin the CID instead of removing any files.
+
+		err := i.api.Pin().Rm(r.Context(), ipath.IpfsPath(rootCid))
+		if err != nil {
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
+		// Success
+		i.addUserHeaders(w)
+		w.Header().Set("IPFS-Hash", getV1(rootCid).String())
 		return
 	}
+
+	shouldPin := r.Header.Get(pinHeader) != ""
 
 	root, ok := i.rootFromCid(w, r, rootCid)
 	if !ok {
@@ -1066,11 +1115,24 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	if !i.removePathFromDir(w, r, root, newPath) {
 		return
 	}
-	ncid, ok := i.finalizeDir(w, root)
+	newCid, ok := i.finalizeDir(w, root)
 	if !ok {
 		return
 	}
-	cidStr := getV1(ncid).String()
+	cidStr := getV1(newCid).String()
+
+	if shouldPin {
+		// Pin dir
+		err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+		if err != nil {
+			// Set header so CID is known to client and can be used, or pinning
+			// can be tried again
+			w.Header().Set("IPFS-Hash", cidStr)
+			webError(w, "WritableGateway: failed to pin directory of files", err,
+				http.StatusInternalServerError)
+			return
+		}
+	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
@@ -1132,6 +1194,11 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if ipnsPath == "" || ipnsPath == "/" {
+		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
+		return
+	}
+
 	// Remove trailing slash from ipnsPath if it exists
 	// Otherwise directories won't be removed
 	ipnsPath = strings.TrimRight(ipnsPath, "/")
@@ -1180,18 +1247,19 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
 		return
 	}
-	resolvedCid := strings.Split(resolvedPath.String(), "/")[2]
+	resolvedCidStr := strings.Split(resolvedPath.String(), "/")[2]
+	resolvedCid := cidMustDecode(resolvedCidStr)
 
 	// Remove file/dir
 
-	root, ok := i.rootFromCid(w, r, cidMustDecode(resolvedCid))
+	root, ok := i.rootFromCid(w, r, resolvedCid)
 	if !ok {
 		return
 	}
 	if !i.removePathFromDir(w, r, root, ipnsPath) {
 		return
 	}
-	ncid, ok := i.finalizeDir(w, root)
+	newCid, ok := i.finalizeDir(w, root)
 	if !ok {
 		return
 	}
@@ -1208,12 +1276,31 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	ipnsEntry, err := i.api.Name().Publish(
-		r.Context(), ipath.IpfsPath(ncid),
+		r.Context(), ipath.IpfsPath(newCid),
 		options.Name.AllowOffline(true), options.Name.Key(keyOpt),
 	)
 	if err != nil {
 		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
 		return
+	}
+
+	// Successfully published new path
+	// Pin content and unpin old
+
+	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
+	if err != nil {
+		webError(w, "WritableGateway: name published but failed to pin new content", err,
+			http.StatusInternalServerError)
+		return
+	}
+	if !getV1(resolvedCid).Equals(emptyDirCid) {
+		// There was something previously there to unpin
+		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+		if err != nil {
+			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+				http.StatusInternalServerError)
+			return
+		}
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
@@ -1353,14 +1440,16 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
 	if err != nil {
-		webError(w, "WritableGateway: name published but failed to pin new content", err, http.StatusInternalServerError)
+		webError(w, "WritableGateway: name published but failed to pin new content", err,
+			http.StatusInternalServerError)
 		return
 	}
-	if !resolvedCid.Equals(emptyDirCid) {
+	if !getV1(resolvedCid).Equals(emptyDirCid) {
 		// There was something previously there to unpin
 		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
 		if err != nil {
-			webError(w, "WritableGateway: name published but failed to unpin new content", err, http.StatusInternalServerError)
+			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+				http.StatusInternalServerError)
 			return
 		}
 	}
