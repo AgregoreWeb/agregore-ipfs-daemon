@@ -101,6 +101,11 @@ func setupConfig(cfg *config.Config) {
 	cfg.Gateway.HTTPHeaders["Access-Control-Allow-Headers"] = []string{"X-IPFS-Pin"}
 	cfg.Gateway.HTTPHeaders["Access-Control-Expose-Headers"] = []string{"IPFS-Hash", "X-IPFS-Path", "X-IPNS-Path", "Etag"}
 	cfg.Gateway.HTTPHeaders["Access-Control-Max-Age"] = []string{"86400"}
+
+	if runtime.GOOS == "android" {
+		// Disable mDNS because it's manually started
+		cfg.Discovery.MDNS.Enabled = false
+	}
 }
 
 func createRepo(path string) error {
