@@ -39,15 +39,7 @@ func (i *gatewayHandler) pubsubGetHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Convert custom headers to bytes for eventsource library
-	if i.headerBytes == nil {
-		i.headerBytes = make([][]byte, 0)
-		for header, vals := range i.config.Headers {
-			for j := range vals {
-				i.headerBytes = append(i.headerBytes, []byte(fmt.Sprintf("%s: %s", header, vals[j])))
-			}
-		}
-	}
+	i.setupPubsubHeaders()
 
 	es, err := i.getEventsource(r.Context(), topic)
 	if err != nil {
@@ -68,15 +60,7 @@ func (i *gatewayHandler) pubsubPostHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Convert custom headers to bytes for eventsource library
-	if i.headerBytes == nil {
-		i.headerBytes = make([][]byte, 0)
-		for header, vals := range i.config.Headers {
-			for j := range vals {
-				i.headerBytes = append(i.headerBytes, []byte(fmt.Sprintf("%s: %s", header, vals[j])))
-			}
-		}
-	}
+	i.setupPubsubHeaders()
 
 	var data bytes.Buffer
 	_, err := io.Copy(&data, r.Body)
@@ -121,6 +105,22 @@ func (i *gatewayHandler) getEventsource(ctx context.Context, topic string) (even
 		go i.pubsubMsgHandler(es, pss, topic)
 	}
 	return es, nil
+}
+
+func (i *gatewayHandler) setupPubsubHeaders() {
+	// Convert custom headers to bytes for eventsource library
+	if i.headerBytes == nil {
+		i.headerBytes = make([][]byte, 0)
+		for header, vals := range i.config.Headers {
+			for j := range vals {
+				i.headerBytes = append(i.headerBytes, []byte(fmt.Sprintf("%s: %s", header, vals[j])))
+			}
+		}
+		// Add custom header providing the node's own ID, so pubsub messages from
+		// itself can be filtered
+		i.headerBytes = append(i.headerBytes, []byte("X-IPFS-ID: "+i.id.Pretty()))
+	}
+
 }
 
 type pubSubMsg struct {

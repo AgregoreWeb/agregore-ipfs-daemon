@@ -82,6 +82,7 @@ type gatewayHandler struct {
 	config   GatewayConfig
 	api      coreiface.CoreAPI
 	keystore keystore.Keystore
+	id       peer.ID
 
 	// Maps pubsub topics to SSE structs
 	eventsources map[string]eventsource.EventSource
@@ -109,7 +110,7 @@ func (sw *statusResponseWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
-func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore.Keystore) *gatewayHandler {
+func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore.Keystore, id peer.ID) *gatewayHandler {
 	unixfsGetMetric := prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: "ipfs",
@@ -131,6 +132,7 @@ func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore
 		config:          c,
 		api:             api,
 		keystore:        keystore,
+		id:              id,
 		eventsources:    make(map[string]eventsource.EventSource),
 		unixfsGetMetric: unixfsGetMetric,
 	}
