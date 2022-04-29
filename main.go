@@ -9,7 +9,12 @@ import (
 // This file is only used when building a binary for debugging on a desktop machine.
 
 func main() {
-	exitCode := gateway.RunSynchronous("agregore-ipfs-repo", "")
+	port := "8080"
+	if len(os.Args) > 1 {
+		port = os.Args[1]
+	}
+
+	exitCode := gateway.RunSynchronous("agregore-ipfs-repo", port, "")
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}

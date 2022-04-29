@@ -74,7 +74,7 @@ func setupPlugins(externalPluginsPath string) error {
 }
 
 // setupConfig applies custom settings to an IPFS config
-func setupConfig(cfg *config.Config) {
+func setupConfig(cfg *config.Config, gatewayPort string) {
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/config.md
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md
 
@@ -83,7 +83,7 @@ func setupConfig(cfg *config.Config) {
 	// Disable API to prevent malicious apps from using
 	cfg.Addresses.API = []string{}
 	// Run gateway on ~~Unix socket~~ leave as default for now
-	cfg.Addresses.Gateway = []string{"/ip4/127.0.0.1/tcp/8080"}
+	cfg.Addresses.Gateway = []string{"/ip4/127.0.0.1/tcp/" + gatewayPort}
 	cfg.Gateway.Writable = true
 	// Reduce number of peer connections to reduce resource usage
 	// TODO: needs tuning
@@ -108,7 +108,7 @@ func setupConfig(cfg *config.Config) {
 	}
 }
 
-func createRepo(path string) error {
+func createRepo(path, gatewayPort string) error {
 	err := os.Mkdir(path, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create repo dir: %s", err)
@@ -121,7 +121,7 @@ func createRepo(path string) error {
 	}
 
 	// Custom settings
-	setupConfig(cfg)
+	setupConfig(cfg, gatewayPort)
 
 	// Create the repo with the config
 	err = fsrepo.Init(path, cfg)
@@ -135,7 +135,7 @@ func createRepo(path string) error {
 /// ------ Spawning the node
 
 // Creates an IPFS node and returns its coreAPI
-func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.IpfsNode, error) {
+func createNode(ctx context.Context, repoPath, gatewayPort string) (icore.CoreAPI, *core.IpfsNode, error) {
 	// Open the repo
 	repo, err := fsrepo.Open(repoPath)
 	if err != nil {
@@ -147,7 +147,7 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.Ipfs
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to retrieve repo config: %w", err)
 	}
-	setupConfig(cfg)
+	setupConfig(cfg, gatewayPort)
 	err = repo.SetConfig(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to set repo config: %w", err)
@@ -189,7 +189,7 @@ func createNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.Ipfs
 }
 
 // Spawns a node on the default repo location, creating it if it doesn't exist
-func spawnNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.IpfsNode, error) {
+func spawnNode(ctx context.Context, repoPath, gatewayPort string) (icore.CoreAPI, *core.IpfsNode, error) {
 	if err := setupPlugins(repoPath); err != nil {
 		return nil, nil, err
 	}
@@ -197,7 +197,7 @@ func spawnNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.IpfsN
 	// Create repo if needed
 	if _, err := os.Stat(repoPath); err != nil {
 		if os.IsNotExist(err) {
-			err := createRepo(repoPath)
+			err := createRepo(repoPath, gatewayPort)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -207,7 +207,7 @@ func spawnNode(ctx context.Context, repoPath string) (icore.CoreAPI, *core.IpfsN
 		}
 	}
 
-	return createNode(ctx, repoPath)
+	return createNode(ctx, repoPath, gatewayPort)
 }
 
 func connectToPeers(ctx context.Context, ipfs icore.CoreAPI, peers []string) error {
@@ -283,17 +283,20 @@ func getUnixfsNode(path string) (files.Node, error) {
 // Run starts up the daemon and returns immediately.
 //
 // repoPath is a path to a directory for the IPFS repo. It doesn't need to exist.
+//
 // interfaces is a newline-delimited list of network interface definitions.
 // It is only needed on Android. See get_interfaces.java for code of how this
 // string is generated.
-func Run(repoPath string, interfaces string) {
-	go RunSynchronous(repoPath, interfaces)
+//
+// gatewayPort is the TCP port the gateway runs on.
+func Run(repoPath, gatewayPort, interfaces string) {
+	go RunSynchronous(repoPath, gatewayPort, interfaces)
 }
 
 // RunSynchronous is like Run but returns an exit code greater than 0 if there
 // are any errors. It does not return unless there is an error and the daemon
 // has stopped.
-func RunSynchronous(repoPath string, interfaces string) int {
+func RunSynchronous(repoPath, gatewayPort, interfaces string) int {
 	running = true
 	defer func() { running = false }()
 
@@ -352,7 +355,7 @@ func RunSynchronous(repoPath string, interfaces string) int {
 	// Shared context for all IPFS node stuff
 	ctx, cancel := context.WithCancel(context.Background())
 
-	_, node, err := spawnNode(ctx, repoPath)
+	_, node, err := spawnNode(ctx, repoPath, gatewayPort)
 	if err != nil {
 		log.Printf("failed to spawn node: %s", err)
 		cancel() // Linter
