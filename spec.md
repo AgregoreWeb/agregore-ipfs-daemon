@@ -41,6 +41,11 @@
     - [DELETE `/ipns/localhost[/<path>]`](#delete-ipnslocalhostpath)
       - [Query params](#query-params-2)
       - [Response](#response-9)
+  - [Pubsub](#pubsub)
+    - [GET `/pubsub/<topic>`](#get-pubsubtopic)
+      - [Query params](#query-params-3)
+      - [Response](#response-10)
+    - [POST `/pubsub/<topic>`](#post-pubsubtopic)
 
 ## CORS
 
@@ -222,3 +227,49 @@ Behaves the same as `/ipns/<key>[/<path>]`.
 
 #### Response
 The same as `/ipns/<key>[/<path>]`. Note this allows for extraction of the actual public key from future use and link sharing.
+
+## Pubsub
+
+An experimental pubsub API is supported to give users direct access to sending and receiving pubsub messages.
+
+### GET `/pubsub/<topic>`
+
+#### Query params
+- `format`: can be `json`, `utf8`, `base64`, or not specified, which defaults to `base64`. This controls the decoding of pubsub message bytes
+
+#### Response
+
+The response is an [event stream](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#event_stream_format), so pubsub messages for that topic will be sent to the client as long as the connection remains open.
+
+Pubsub messages are encoded as events like this:
+
+```
+id: FuhB2orEIwE=
+data: {"from":"QmfULfLaRtF7Kg3ShjFdiYL97P7eEcyL4PcvQLhkzCPCeG","data":"aGVsbG8=","topics":["test"]}
+```
+
+The "message identifier" of the pubsub message is base64-encoded to form the `id:`. `data:` is always encoded as JSON, with the other three things known about a pubsub message.
+
+In the JSON: `from` is the prettified ID of the node who sent the message, `data` is the message data, and `topics` is an array of topics this message was sent to.
+
+In the JSON, `data` is either a JSON object, a string, or bytes base64-encoded into a string. This behaviour depends on the format parameter mentioned above.
+
+The response also contains the header `X-IPFS-ID` which is this node's prettified ID. This allows the client to filter out pubsub messages that come from itself.
+
+Errors are also sent as events in the stream:
+
+```
+data: something failed blah blah
+event: error
+```
+
+Errors with decoding the message bytes into the desired `format` are represented with the type `error-decode`:
+
+```
+event: error-decode
+data: not valid UTF-8
+```
+
+### POST `/pubsub/<topic>`
+
+Send a pubsub message, with a maximum size of 1 MiB. Anything larger is rejected with status code 413.
