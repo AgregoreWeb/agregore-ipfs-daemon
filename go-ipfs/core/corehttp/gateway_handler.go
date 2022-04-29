@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antage/eventsource"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/ipfs/go-cid"
@@ -81,6 +82,11 @@ type gatewayHandler struct {
 	config   GatewayConfig
 	api      coreiface.CoreAPI
 	keystore keystore.Keystore
+	id       peer.ID
+
+	// Maps pubsub topics and formats to SSE structs
+	eventsources map[string]eventsource.EventSource
+	headerBytes  [][]byte
 
 	unixfsGetMetric *prometheus.SummaryVec
 }
@@ -104,7 +110,7 @@ func (sw *statusResponseWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
-func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore.Keystore) *gatewayHandler {
+func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore.Keystore, id peer.ID) *gatewayHandler {
 	unixfsGetMetric := prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: "ipfs",
@@ -126,6 +132,8 @@ func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore
 		config:          c,
 		api:             api,
 		keystore:        keystore,
+		id:              id,
+		eventsources:    make(map[string]eventsource.EventSource),
 		unixfsGetMetric: unixfsGetMetric,
 	}
 	return i
@@ -164,6 +172,18 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			debug.PrintStack()
 		}
 	}()
+
+	if strings.HasPrefix(r.URL.Path, "/pubsub/") {
+		switch r.Method {
+		case http.MethodGet:
+			i.pubsubGetHandler(w, r)
+		case http.MethodPost:
+			i.pubsubPostHandler(w, r)
+		default:
+			http.Error(w, "Method "+r.Method+" not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
 
 	if i.config.Writable {
 		switch r.Method {
