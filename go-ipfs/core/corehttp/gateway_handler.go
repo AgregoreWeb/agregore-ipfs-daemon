@@ -84,7 +84,7 @@ type gatewayHandler struct {
 	keystore keystore.Keystore
 	id       peer.ID
 
-	// Maps pubsub topics to SSE structs
+	// Maps pubsub topics and formats to SSE structs
 	eventsources map[string]eventsource.EventSource
 	headerBytes  [][]byte
 
