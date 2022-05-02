@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	golog "log"
 	"sync"
 	"time"
 
@@ -30,9 +29,6 @@ import (
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
-	start := time.Now()
-	defer func() { golog.Println("IpfsDHT.PutValue", time.Since(start)) }()
-
 	if !dht.enableValues {
 		return routing.ErrNotSupported
 	}
@@ -69,9 +65,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	start2 := time.Now()
 	peers, err := dht.GetClosestPeers(ctx, key, true)
-	golog.Println("IpfsDHT.PutValue: dht.GetClosestPeers", time.Since(start2))
 	if err != nil {
 		return err
 	}
@@ -105,8 +99,6 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		}
 	}
 
-	start3 := time.Now()
-
 	// Synchronous puts
 	wg := sync.WaitGroup{}
 	for _, p := range peers[:syncN] {
@@ -127,8 +119,6 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		}(p)
 	}
 	wg.Wait()
-
-	golog.Println("IpfsDHT.PutValue: sync puts", time.Since(start3))
 
 	return nil
 }

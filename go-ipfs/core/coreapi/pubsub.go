@@ -3,8 +3,6 @@ package coreapi
 import (
 	"context"
 	"errors"
-	golog "log"
-	"time"
 
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	caopts "github.com/ipfs/interface-go-ipfs-core/options"
@@ -47,9 +45,6 @@ func (api *PubSubAPI) Peers(ctx context.Context, opts ...caopts.PubSubPeersOptio
 }
 
 func (api *PubSubAPI) Publish(ctx context.Context, topic string, data []byte) error {
-	start := time.Now()
-	defer func() { golog.Println("pubsub.go Publish", time.Since(start)) }()
-
 	_, err := api.checkNode()
 	if err != nil {
 		return err

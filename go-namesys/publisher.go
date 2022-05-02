@@ -2,7 +2,6 @@ package namesys
 
 import (
 	"context"
-	golog "log"
 	"strings"
 	"sync"
 	"time"
@@ -150,11 +149,8 @@ func (p *IpnsPublisher) updateRecord(ctx context.Context, k crypto.PrivKey, valu
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	start := time.Now()
-
 	// get previous records sequence number
 	rec, err := p.GetPublished(ctx, id, false)
-	golog.Println("updateRecord: p.GetPublished", time.Since(start))
 	if err != nil {
 		return nil, err
 	}
@@ -195,16 +191,11 @@ func (p *IpnsPublisher) updateRecord(ctx context.Context, k crypto.PrivKey, valu
 // PublishWithEOL is a temporary stand in for the ipns records implementation
 // see here for more details: https://github.com/ipfs/specs/tree/master/records
 func (p *IpnsPublisher) PublishWithEOL(ctx context.Context, k crypto.PrivKey, value path.Path, eol time.Time) error {
-	start := time.Now()
 	record, err := p.updateRecord(ctx, k, value, eol)
-	golog.Println("p.updateRecord", time.Since(start))
-
 	if err != nil {
 		return err
 	}
 
-	start = time.Now()
-	defer func() { golog.Println("PublishWithEOL: PutRecordToRouting", time.Since(start)) }()
 	return PutRecordToRouting(ctx, p.routing, k.GetPublic(), record)
 }
 

@@ -1041,8 +1041,6 @@ func (sc *stringsCloser) Close() error {
 }
 
 func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -1082,9 +1080,6 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	r.Body = &stringsCloser{strings.NewReader(cidStr), func() error { return r.Body.Close() }}
-
-	golog.Println("ipnsPutHandler", time.Since(start))
-
 	i.ipnsPostHandler(w, r)
 }
 
@@ -1393,7 +1388,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
 
-		golog.Println("resolve time", time.Since(start))
+		golog.Println("name resolve time", time.Since(start))
 
 		if err == nil {
 			segs := strings.Split(resolvedPath.String(), "/")
@@ -1426,7 +1421,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		golog.Println("overall publish time", time.Since(start))
+		golog.Println("name publish time", time.Since(start))
 
 		newCid = inCid
 	} else {
@@ -1462,8 +1457,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	// Successfully published new path
 	// Pin content and unpin old
 
-	start = time.Now()
-
 	err = i.api.Pin().Add(r.Context(), ipath.IpfsPath(newCid))
 	if err != nil {
 		webError(w, "WritableGateway: name published but failed to pin new content", err,
@@ -1479,8 +1472,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-
-	golog.Println("pin and unpin time", time.Since(start))
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
