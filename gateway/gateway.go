@@ -99,7 +99,7 @@ func setupConfig(cfg *config.Config, gatewayPort string) {
 	cfg.Gateway.HTTPHeaders = make(map[string][]string)
 	cfg.Gateway.HTTPHeaders["Access-Control-Allow-Methods"] = []string{"GET", "HEAD", "POST", "PUT", "DELETE"}
 	cfg.Gateway.HTTPHeaders["Access-Control-Allow-Headers"] = []string{"X-IPFS-Pin"}
-	cfg.Gateway.HTTPHeaders["Access-Control-Expose-Headers"] = []string{"IPFS-Hash", "X-IPFS-Path", "X-IPNS-Path", "Etag"}
+	cfg.Gateway.HTTPHeaders["Access-Control-Expose-Headers"] = []string{"IPFS-Hash", "X-IPFS-Path", "X-IPNS-Path", "Etag", "X-IPFS-ID"}
 	cfg.Gateway.HTTPHeaders["Access-Control-Max-Age"] = []string{"86400"}
 
 	if runtime.GOOS == "android" {
