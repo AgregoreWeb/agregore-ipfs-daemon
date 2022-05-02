@@ -70,6 +70,7 @@ Access-Control-Expose-Headers: X-Chunked-Output
 Access-Control-Expose-Headers: X-Ipfs-Path
 Access-Control-Expose-Headers: X-Ipns-Path
 Access-Control-Expose-Headers: X-Stream-Output
+Access-Control-Expose-Headers: X-Ipfs-Id
 ```
 
 ## CIDs
