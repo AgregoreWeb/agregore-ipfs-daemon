@@ -241,5 +241,8 @@ require (
 
 replace (
 	github.com/ipfs/go-ipfs => ./go-ipfs
+
+	github.com/ipfs/go-namesys => ./go-namesys
+	github.com/libp2p/go-libp2p-kad-dht => ./go-libp2p-kad-dht
 	github.com/multiformats/go-multiaddr => github.com/berty/go-multiaddr v0.4.2-0.20220126184027-53e56f02fb68
 )

@@ -79,6 +79,7 @@ func setupConfig(cfg *config.Config, gatewayPort string) {
 	// https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md
 
 	// Enable pubsub for better IPNS
+	cfg.Pubsub.Enabled = config.True
 	cfg.Ipns.UsePubsub = config.True
 	// Disable API to prevent malicious apps from using
 	cfg.Addresses.API = []string{}
