@@ -50,11 +50,21 @@ var (
 	stoppedCh = make(chan struct{})
 
 	running = false
+
+	// Plugins only need to be done the first time the node loads.
+	// If it stops and then starts again it will try to load plugins again
+	// which causes an error like:
+	// error initializing plugins: already have a datastore named "badgerds"
+	pluginsDone = false
 )
 
 /// ------ Setting up the IPFS Repo
 
 func setupPlugins(externalPluginsPath string) error {
+	if pluginsDone {
+		return nil
+	}
+
 	// Load any external plugins if available on externalPluginsPath
 	plugins, err := loader.NewPluginLoader(filepath.Join(externalPluginsPath, "plugins"))
 	if err != nil {
@@ -70,6 +80,7 @@ func setupPlugins(externalPluginsPath string) error {
 		return fmt.Errorf("error initializing plugins: %s", err)
 	}
 
+	pluginsDone = true
 	return nil
 }
 
