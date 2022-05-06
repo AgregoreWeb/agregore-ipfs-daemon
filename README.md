@@ -22,6 +22,8 @@ docker run --rm -v "$PWD":/module makeworld/gomobile-android bind -target=androi
 
 ## Development
 
+Currently Go 1.17 is required, Go 1.18 will not work due to [this issue](https://github.com/ipfs/go-ipfs/issues/8819) which affects the go-ipfs version included in this repo.
+
 Instead of running `go mod tidy` run:
 
 ```
