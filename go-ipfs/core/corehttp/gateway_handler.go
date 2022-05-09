@@ -179,6 +179,8 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			i.pubsubGetHandler(w, r)
 		case http.MethodPost:
 			i.pubsubPostHandler(w, r)
+		case http.MethodHead:
+			i.pubsubHeadHandler(w, r)
 		default:
 			http.Error(w, "Method "+r.Method+" not allowed", http.StatusMethodNotAllowed)
 		}

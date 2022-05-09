@@ -34,6 +34,11 @@ const (
 	maxPubsubMsgSize = 1 << 20
 )
 
+func (i *gatewayHandler) pubsubHeadHandler(w http.ResponseWriter, r *http.Request) {
+	i.addUserHeaders(w)
+	w.Header().Set("X-IPFS-ID", i.id.Pretty())
+}
+
 func (i *gatewayHandler) pubsubGetHandler(w http.ResponseWriter, r *http.Request) {
 	topic := r.URL.Path[len("/pubsub/"):]
 	if topic == "" {
