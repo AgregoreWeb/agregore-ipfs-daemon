@@ -173,6 +173,12 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	if len(r.URL.RawQuery) > 0 {
+		golog.Printf("Gateway: %s %s", r.Method, r.URL.Path+"?"+r.URL.RawQuery)
+	} else {
+		golog.Printf("Gateway: %s %s", r.Method, r.URL.Path)
+	}
+
 	if strings.HasPrefix(r.URL.Path, "/pubsub/") {
 		switch r.Method {
 		case http.MethodGet:
