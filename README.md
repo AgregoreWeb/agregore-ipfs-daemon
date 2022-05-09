@@ -12,7 +12,7 @@ Other modules like `go-libp2p-kad-dht` and `go-namesys` have also been forked an
 
 While this gateway is designed for mobile usage, you can build it for desktop for debugging and development. Just run `go build`.
 
-For mobile, an Android library file (.aar) to be imported and used in an Android project. We have created a docker container that has all the required dependencies to make building easy. Just run:
+For mobile, an Android library file (.aar) is built, to be imported and used in an Android project. We have created a docker container that has all the required dependencies to make building easy. Just run:
 
 ```
 docker run --rm -v "$PWD":/module makeworld/gomobile-android bind -target=android/arm -javapkg=moe.mauve.agregore.ipfs -o agregore-ipfs-daemon.aar ./gateway
