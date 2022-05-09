@@ -71,7 +71,6 @@ Access-Control-Expose-Headers: X-Chunked-Output
 Access-Control-Expose-Headers: X-Ipfs-Path
 Access-Control-Expose-Headers: X-Ipns-Path
 Access-Control-Expose-Headers: X-Stream-Output
-Access-Control-Expose-Headers: X-Ipfs-Id
 ```
 
 ## CIDs
@@ -268,8 +267,6 @@ In the JSON: `from` is the prettified ID of the node who sent the message, `data
 
 In the JSON, `data` is either a JSON object, a string, or bytes base64-encoded into a string. This behaviour depends on the format parameter mentioned above.
 
-The response also contains the header `X-IPFS-ID` which is this node's prettified ID. This allows the client to filter out pubsub messages that come from itself.
-
 Errors are also sent as events in the stream:
 
 ```
@@ -286,9 +283,7 @@ data: not valid UTF-8
 
 ### HEAD `/pubsub/<...>`
 
-This will return the same headers as any GET pubsub request. The header that might be useful is `X-IPFS-ID`, described above.
-
-This API call will work on `/pubsub/` and any path below it, and will always return the same headers.
+This will return the same headers as any GET pubsub request. This API call will work on `/pubsub/` and any path below it, and will always return the same headers.
 
 ### POST `/pubsub/<topic>`
 

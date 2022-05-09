@@ -36,7 +36,6 @@ const (
 
 func (i *gatewayHandler) pubsubHeadHandler(w http.ResponseWriter, r *http.Request) {
 	i.addUserHeaders(w)
-	w.Header().Set("X-IPFS-ID", i.id.Pretty())
 }
 
 type pubSubInfo struct {
@@ -165,9 +164,6 @@ func (i *gatewayHandler) setupPubsubHeaders() {
 				i.headerBytes = append(i.headerBytes, []byte(fmt.Sprintf("%s: %s", header, vals[j])))
 			}
 		}
-		// Add custom header providing the node's own ID, so pubsub messages from
-		// itself can be filtered
-		i.headerBytes = append(i.headerBytes, []byte("X-IPFS-ID: "+i.id.Pretty()))
 	}
 
 }
