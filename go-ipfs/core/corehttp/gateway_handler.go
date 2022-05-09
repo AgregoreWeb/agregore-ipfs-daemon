@@ -197,7 +197,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			if strings.HasPrefix(r.URL.Path, ipnsPathPrefix) {
-				i.ipnsPostHandler(w, r)
+				if strings.HasPrefix(r.URL.Path, ipnsPathPrefix+"localhost") {
+					i.keyPostHandler(w, r)
+				} else {
+					i.ipnsPostHandler(w, r)
+				}
 			} else {
 				i.ipfsPostHandler(w, r)
 			}
@@ -211,7 +215,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case http.MethodDelete:
 			if strings.HasPrefix(r.URL.Path, ipnsPathPrefix) {
-				i.ipnsDeleteHandler(w, r)
+				if strings.HasPrefix(r.URL.Path, ipnsPathPrefix+"localhost") {
+					i.keyDeleteHandler(w, r)
+				} else {
+					i.ipnsDeleteHandler(w, r)
+				}
 			} else {
 				i.ipfsDeleteHandler(w, r)
 			}
@@ -221,7 +229,11 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		i.getOrHeadHandler(w, r)
+		if strings.HasPrefix(r.URL.Path, ipnsPathPrefix+"localhost") {
+			i.keyGetHandler(w, r)
+		} else {
+			i.getOrHeadHandler(w, r)
+		}
 		return
 	case http.MethodOptions:
 		i.optionsHandler(w, r)
@@ -1124,7 +1136,7 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 
 		err := i.api.Pin().Rm(r.Context(), ipath.IpfsPath(rootCid))
 		if err != nil {
-			webError(w, "WritableGateway: failed to pin directory of files", err,
+			webError(w, "WritableGateway: failed to unpin directory of files", err,
 				http.StatusInternalServerError)
 			return
 		}
@@ -1170,7 +1182,6 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 
 func decodeIpnsPath(w http.ResponseWriter, r *http.Request) (
 	ipnsPath, // part after key, no leading slash
-	keyName, // the custom name of the key
 	keyFromPath string, // full public key, the part after /ipns/
 	ok bool,
 ) {
@@ -1194,30 +1205,108 @@ func decodeIpnsPath(w http.ResponseWriter, r *http.Request) (
 			ipnsPath += "/"
 		}
 	}
-
-	if keyFromPath == "localhost" {
-		// URL is something like these:
-		// /ipns/localhost?key=my_petname
-		// /ipns/localhost/some/path?key=my_other_petname
-
-		// We don't have the key, only the key name
-		keyFromPath = ""
-		keyName = r.URL.Query().Get("key")
-		if keyName == "" {
-			webError(w,
-				"WritableGateway: localhost specified as IPNS key but no key param in query string",
-				nil, http.StatusBadRequest,
-			)
-			return
-		}
-	}
-
 	ok = true
 	return
 }
 
+func decodeIpnsKeyURL(w http.ResponseWriter, r *http.Request) (
+	ipnsPath, // part after key, no leading slash
+	keyName string, // the custom name of the key
+	ok bool,
+) {
+	rootPath, err := path.ParsePath(r.URL.Path)
+	if err != nil {
+		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
+		return
+	}
+	segs := rootPath.Segments()
+	if len(segs) < 2 {
+		webError(w, "WritableGateway: no IPNS key name specified", err, http.StatusBadRequest)
+		return
+	}
+	if len(segs) > 2 {
+		// Path is there
+		ipnsPath = strings.Join(segs[2:], "/")
+		if r.URL.Path[len(r.URL.Path)-1] == '/' {
+			ipnsPath += "/"
+		}
+	}
+
+	keyName = r.URL.Query().Get("key")
+	if keyName == "" {
+		webError(w,
+			"WritableGateway: localhost specified as IPNS key but no key param in query string",
+			nil, http.StatusBadRequest,
+		)
+		return
+	}
+	ok = true
+	return
+}
+
+func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	_, keyName, ok := decodeIpnsKeyURL(w, r)
+	if !ok {
+		return
+	}
+
+	has, err := i.keystore.Has(keyName)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	if !has {
+		// Key doesn't exist and so won't resolve to anything
+		// So no files can be deleted from it
+		webError(w, "Key does not exist", nil, http.StatusBadRequest)
+		return
+	}
+
+	// Turn key name into string representation of public key
+	sk, err := i.keystore.Get(keyName)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	pk := sk.GetPublic()
+	pid, err := peer.IDFromPublicKey(pk)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	keyStr := keyEnc.FormatID(pid)
+
+	// Get current IPFS path and CID
+	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+	if err != nil {
+		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
+		return
+	}
+	resolvedCidStr := strings.Split(resolvedPath.String(), "/")[2]
+	resolvedCid := cidMustDecode(resolvedCidStr)
+
+	// Unpin content of this key
+	err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+	if err != nil {
+		webError(w, "WritableGateway: failed to unpin new content", err, http.StatusInternalServerError)
+		return
+	}
+
+	// Delete key
+	err = i.keystore.Delete(keyName)
+	if err != nil {
+		webError(w, "WritableGateway: failed to delete key", err, http.StatusInternalServerError)
+		return
+	}
+}
+
 func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	ipnsPath, keyName, keyFromPath, ok := decodeIpnsPath(w, r)
+	ipnsPath, keyFromPath, ok := decodeIpnsPath(w, r)
 	if !ok {
 		return
 	}
@@ -1231,46 +1320,8 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	// Otherwise directories won't be removed
 	ipnsPath = strings.TrimRight(ipnsPath, "/")
 
-	if keyFromPath == "" {
-		has, err := i.keystore.Has(keyName)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		if !has {
-			// Key doesn't exist and so won't resolve to anything
-			// So no files can be deleted from it
-			webError(w, "Key does not exist", nil, http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Turn key name into string representation of public key
-
-	keyStr := keyFromPath
-
-	if keyFromPath == "" {
-		sk, err := i.keystore.Get(keyName)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		pk := sk.GetPublic()
-		pid, err := peer.IDFromPublicKey(pk)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyStr = keyEnc.FormatID(pid)
-	}
-
 	// Get current IPFS path and CID
-	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyFromPath)
 	if err != nil {
 		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
 		return
@@ -1294,18 +1345,9 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 
 	// Publish new path
 
-	// Publish option specifiying key
-	// Use key name if possible, otherwise use full key
-	var keyOpt string
-	if keyName != "" {
-		keyOpt = keyName
-	} else {
-		keyOpt = keyFromPath
-	}
-
 	ipnsEntry, err := i.api.Name().Publish(
 		r.Context(), ipath.IpfsPath(newCid),
-		options.Name.AllowOffline(true), options.Name.Key(keyOpt),
+		options.Name.AllowOffline(true), options.Name.Key(keyFromPath),
 	)
 	if err != nil {
 		webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
@@ -1336,9 +1378,91 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), gopath.Dir(ipnsPath)), http.StatusTemporaryRedirect)
 }
 
+func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
+	ipnsPath, keyName, ok := decodeIpnsKeyURL(w, r)
+	if !ok {
+		return
+	}
+
+	sk, err := i.keystore.Get(keyName)
+	if errors.Is(err, keystore.ErrNoSuchKey) {
+		// Key with provided name doesn't exist
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		// Other error
+		internalWebError(w, err)
+		return
+	}
+
+	// Turn key name into string representation of public key
+	pk := sk.GetPublic()
+	keyID, err := peer.IDFromPublicKey(pk)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+
+	// Redirect to full key path
+	redirLoc := "ipns://" + keyEnc.FormatID(keyID)
+	if len(ipnsPath) > 0 {
+		redirLoc = "ipns://" + keyEnc.FormatID(keyID) + "/" + ipnsPath
+	}
+	http.Redirect(w, r, redirLoc, http.StatusTemporaryRedirect)
+}
+
+func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) {
+	_, keyName, ok := decodeIpnsKeyURL(w, r)
+	if !ok {
+		return
+	}
+
+	has, err := i.keystore.Has(keyName)
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	var keyID peer.ID
+	if has {
+		// Turn key name into string representation of public key
+		sk, err := i.keystore.Get(keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		pk := sk.GetPublic()
+		keyID, err = peer.IDFromPublicKey(pk)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+	} else {
+		// Generate key, then get string representation
+		key, err := i.api.Key().Generate(r.Context(), keyName)
+		if err != nil {
+			internalWebError(w, err)
+			return
+		}
+		keyID = key.ID()
+	}
+
+	keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	http.Redirect(w, r, "ipns://"+keyEnc.FormatID(keyID), http.StatusCreated)
+}
+
 // ipnsPostHandler takes an /ipfs/ path in the body and updates the /ipns/ path in URL
 func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request) {
-	ipnsPath, keyName, keyFromPath, ok := decodeIpnsPath(w, r)
+	ipnsPath, keyFromPath, ok := decodeIpnsPath(w, r)
 	if !ok {
 		return
 	}
@@ -1357,78 +1481,47 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Create key if needed
-	hadKey := true
-	if keyFromPath == "" {
-		has, err := i.keystore.Has(keyName)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		if !has {
-			hadKey = false
-			// Generate key with name
-			_, err = i.api.Key().Generate(r.Context(), keyName)
-			if err != nil {
-				internalWebError(w, err)
-				return
-			}
-		}
-	}
-
-	// Publish option specifiying key
-	// Use key name if possible, otherwise use full key
-	var keyOpt string
-	if keyName != "" {
-		keyOpt = keyName
-	} else {
-		keyOpt = keyFromPath
-	}
-
-	// Turn key name into string representation of public key
-	keyStr := keyFromPath
-	if keyFromPath == "" {
-		sk, err := i.keystore.Get(keyName)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		pk := sk.GetPublic()
-		pid, err := peer.IDFromPublicKey(pk)
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
-		if err != nil {
-			internalWebError(w, err)
-			return
-		}
-		keyStr = keyEnc.FormatID(pid)
-	}
-
 	start := time.Now()
 
 	// Get current IPFS path and CID
-	var resolvedCid cid.Cid
-	if hadKey {
-		// Key already existed, try to resolve
 
-		resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
+	//
 
-		golog.Println("name resolve time", time.Since(start))
-
-		if err == nil {
-			segs := strings.Split(resolvedPath.String(), "/")
-			resolvedCid = cidMustDecode(segs[2])
-		} else {
-			// Path couldn't be resolved
-			// This probably means that it doesn't exist
-			// So create it, using the empty dir CID
-			resolvedCid = emptyDirCid
+	// See if key is a key this node owns
+	ourKey := false
+	keyEnc, err := ke.KeyEncoderFromString("base36") // Default encoding
+	if err != nil {
+		internalWebError(w, err)
+		return
+	}
+	keys, err := i.api.Key().List(r.Context())
+	for _, key := range keys {
+		if keyEnc.FormatID(key.ID()) == keyFromPath {
+			ourKey = true
+			break
 		}
+	}
+
+	resolveCtx := r.Context()
+	if ourKey {
+		// Set resolution timeout because it should be very fast if there's anything to resolve
+		// Because it's all local
+		// Otherwise it will take a minute when there's nothing to resolve, looking on the DHT
+		// and stuff. With this context it will give up early
+		resolveCtx, _ = context.WithTimeout(r.Context(), 1*time.Second)
+	}
+
+	// Resolve current path for key
+	var resolvedCid cid.Cid
+	resolvedPath, err := i.api.Name().Resolve(resolveCtx, "/ipns/"+keyFromPath)
+	golog.Println("name resolve time", time.Since(start))
+	if err == nil {
+		segs := strings.Split(resolvedPath.String(), "/")
+		resolvedCid = cidMustDecode(segs[2])
 	} else {
-		// Key was just created, don't waste time trying to resolve
+		// Path couldn't be resolved
+		// This probably means that it doesn't exist
+		// So create it, using the empty dir CID
 		resolvedCid = emptyDirCid
 	}
 
@@ -1442,7 +1535,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.New(bodyPath),
-			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
+			options.Name.AllowOffline(true), options.Name.Key(keyFromPath),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
@@ -1474,7 +1567,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.IpfsPath(newCid),
-			options.Name.AllowOffline(true), options.Name.Key(keyOpt),
+			options.Name.AllowOffline(true), options.Name.Key(keyFromPath),
 		)
 		if err != nil {
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
