@@ -45,6 +45,7 @@
     - [GET `/pubsub/<topic>`](#get-pubsubtopic)
       - [Query params](#query-params-3)
       - [Response](#response-10)
+    - [HEAD `/pubsub/<...>`](#head-pubsub)
     - [POST `/pubsub/<topic>`](#post-pubsubtopic)
 
 ## CORS
@@ -270,6 +271,12 @@ Errors with decoding the message bytes into the desired `format` are represented
 event: error-decode
 data: not valid UTF-8
 ```
+
+### HEAD `/pubsub/<...>`
+
+This will return the same headers as any GET pubsub request. The header that might be useful is `X-IPFS-ID`, described above.
+
+This API call will work on `/pubsub/` and any path below it, and will always return the same headers.
 
 ### POST `/pubsub/<topic>`
 
