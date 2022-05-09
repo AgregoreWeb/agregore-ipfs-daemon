@@ -241,6 +241,19 @@ An experimental pubsub API is supported to give users direct access to sending a
 
 #### Response
 
+If the `Accept` header is set to `text/event-stream`, the response is an [event stream](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#event_stream_format), described below. But otherwise, the response is some JSON information about pubsub. Example:
+
+```json5
+{
+  "id": "ExampleIDHere", // Prettified node ID of this node
+  "topic": "example",    // name of pubsub topic
+  "subscribed": false,   // whether the node is already subscribed
+                         // to the topic or not
+}
+```
+
+**Event Stream**
+
 The response is an [event stream](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#event_stream_format), so pubsub messages for that topic will be sent to the client as long as the connection remains open.
 
 Pubsub messages are encoded as events like this:
