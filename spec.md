@@ -6,7 +6,7 @@
   - [CORS](#cors)
   - [CIDs](#cids)
   - [Multipart Form Data](#multipart-form-data)
-  - [IPFS APIs](#ipfs-apis)
+  - [IPFS API](#ipfs-api)
     - [GET `/ipfs/<CID>[/<path>]`](#get-ipfscidpath)
       - [Path](#path)
       - [Headers](#headers)
@@ -24,27 +24,27 @@
       - [Response](#response-3)
     - [DELETE `/ipfs/<CID>`](#delete-ipfscid)
       - [Response](#response-4)
-  - [IPNS APIs](#ipns-apis)
+  - [IPNS API](#ipns-api)
     - [GET or HEAD `/ipns/<key/domain>[/<path>]`](#get-or-head-ipnskeydomainpath)
       - [Options](#options)
       - [Response](#response-5)
     - [POST `/ipns/<key>[/<path>]`](#post-ipnskeypath)
       - [Request Body](#request-body)
       - [Response](#response-6)
-    - [POST `/ipns/localhost[/<path>]`](#post-ipnslocalhostpath)
-      - [Query params](#query-params-1)
-      - [Response](#response-7)
     - [PUT `/ipns/<key>[/<path>]`](#put-ipnskeypath)
-    - [PUT `/ipns/localhost[/<path>]`](#put-ipnslocalhostpath)
     - [DELETE `/ipns/<key>[/<path>]`](#delete-ipnskeypath)
-      - [Response](#response-8)
-    - [DELETE `/ipns/localhost[/<path>]`](#delete-ipnslocalhostpath)
+      - [Response](#response-7)
+  - [IPNS Key API](#ipns-key-api)
+    - [GET `/ipns/localhost[/<path>]`](#get-ipnslocalhostpath)
+      - [Query params](#query-params-1)
+    - [POST `/ipns/localhost`](#post-ipnslocalhost)
       - [Query params](#query-params-2)
-      - [Response](#response-9)
-  - [Pubsub](#pubsub)
-    - [GET `/pubsub/<topic>`](#get-pubsubtopic)
+    - [DELETE `/ipns/localhost`](#delete-ipnslocalhost)
       - [Query params](#query-params-3)
-      - [Response](#response-10)
+  - [PubSub API](#pubsub-api)
+    - [GET `/pubsub/<topic>`](#get-pubsubtopic)
+      - [Query params](#query-params-4)
+      - [Response](#response-8)
     - [HEAD `/pubsub/<...>`](#head-pubsub)
     - [POST `/pubsub/<topic>`](#post-pubsubtopic)
 
@@ -87,7 +87,7 @@ The name of the field containing the file data must be `file` to be uploaded. Fi
 Browser clients can use the [FormData](https://developer.mozilla.org/en-US/docs/Web/API/FormData) API to submit form data requests.
 
 
-## IPFS APIs
+## IPFS API
 
 
 ### GET `/ipfs/<CID>[/<path>]`
@@ -170,7 +170,7 @@ Unpin the provided CID.
 200 OK if successful.
 
 
-## IPNS APIs
+## IPNS API
 
 
 ### GET or HEAD `/ipns/<key/domain>[/<path>]`
@@ -193,23 +193,9 @@ A valid IPFS path in the format `/ipfs/<CID>[/<path>]` A naked CID is also valid
 #### Response
 A 301 Temporary Redirect to `ipns://<key>[/<path>]`. The header `X-IPNS-Path` is set to the `/ipns/<key>[/<path>]`.
 
-### POST `/ipns/localhost[/<path>]`
-
-Behaves the same as `/ipns/<key>[/<path>]`.
-
-#### Query params
-- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
-
-#### Response
-The same as `/ipns/<key>[/<path>]`. Note this allows for extraction of the actual public key from future use and link sharing.
-
 ### PUT `/ipns/<key>[/<path>]`
 
 The same as POST `/ipns/<key>[/<path>]`, but where the response body is the file to be uploaded, not an IPFS path. Multiple files can be uploaded using form data, in which case files will go inside the directory in the path.
-
-### PUT `/ipns/localhost[/<path>]`
-
-The same as POST `/ipns/localhost[/<path>]`, but where the response body is the file to be uploaded, not an IPFS path. Multiple files can be uploaded using form data, in which case files will go inside the directory in the path.
 
 ### DELETE `/ipns/<key>[/<path>]`
 
@@ -220,17 +206,30 @@ A 301 Temporary Redirect to `ipns://<key>[/<path>]`. The path in the redirect is
 
 The header `X-IPNS-Path` is set to `/ipns/<key>[/<path>]`, with the same path logic as above.
 
-### DELETE `/ipns/localhost[/<path>]`
+## IPNS Key API
 
-Behaves the same as `/ipns/<key>[/<path>]`.
+### GET `/ipns/localhost[/<path>]`
+
+Does a 301 temporary redirect to the actual key address, for example `ipns://k2k4r8lm5pakezcj5cvqpik57twe4ds2sxikeue09ju6se765uvk9ilp`. If a path is included, that will be included in the redirect as well. If a key with that name doesn't exist, 404 will be returned.
 
 #### Query params
 - `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
 
-#### Response
-The same as `/ipns/<key>[/<path>]`. Note this allows for extraction of the actual public key from future use and link sharing.
+### POST `/ipns/localhost`
 
-## Pubsub
+Creates a key with the provided name, and does a 201 Created redirect to the key URL (`ipns://...`). If a key with that name already exists, it will return the same redirect with no issues.
+
+#### Query params
+- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
+
+### DELETE `/ipns/localhost`
+
+This will delete the key with the provided name from the keystore, and unpin the data it points to.
+
+#### Query params
+- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
+
+## PubSub API
 
 An experimental pubsub API is supported to give users direct access to sending and receiving pubsub messages.
 
