@@ -39,10 +39,44 @@ func (i *gatewayHandler) pubsubHeadHandler(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("X-IPFS-ID", i.id.Pretty())
 }
 
+type pubSubInfo struct {
+	ID         string `json:"id"`
+	Topic      string `json:"topic"`
+	Subscribed bool   `json:"subscribed"`
+}
+
 func (i *gatewayHandler) pubsubGetHandler(w http.ResponseWriter, r *http.Request) {
 	topic := r.URL.Path[len("/pubsub/"):]
 	if topic == "" {
 		webError(w, "No topic specified", nil, http.StatusBadRequest)
+		return
+	}
+
+	if r.Header.Get("Accept") != "text/event-stream" {
+		// Return some JSON info instead
+
+		subbedTops, _ := i.api.PubSub().Ls(r.Context())
+		subscribed := false
+		for _, top := range subbedTops {
+			if top == topic {
+				// The topic in the URL is in the list of subscribed topics
+				subscribed = true
+				break
+			}
+		}
+
+		psi := pubSubInfo{
+			Topic:      topic,
+			ID:         i.id.Pretty(),
+			Subscribed: subscribed,
+		}
+		b, err := json.Marshal(&psi)
+		if err != nil {
+			webError(w, "failed to marshal info JSON", err, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(b)
 		return
 	}
 
