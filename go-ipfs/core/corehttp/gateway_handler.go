@@ -285,6 +285,8 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	i.addUserHeaders(w)
+
 	// HostnameOption might have constructed an IPNS/IPFS path using the Host header.
 	// In this case, we need the original path for constructing redirects
 	// and links that match the requested URL.
@@ -392,7 +394,6 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPFS-Path", urlPath)
 	w.Header().Set("Etag", responseEtag)
 	w.Header().Set("IPFS-Hash", getV1(resolvedPath.Cid()).String())
@@ -949,6 +950,8 @@ func (i *gatewayHandler) addFilesFromForm(
 }
 
 func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request) {
+	i.addUserHeaders(w)
+
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -998,12 +1001,13 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
 	http.Redirect(w, r, "ipfs://"+cidStr, http.StatusCreated)
 }
 
 func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) {
+	i.addUserHeaders(w)
+
 	mpr, err := r.MultipartReader()
 	if err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		// Unexpected error
@@ -1068,7 +1072,6 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
 	http.Redirect(w, r, "ipfs:/"+gopath.Join("/", cidStr, newPath), http.StatusCreated)
 }
@@ -1126,7 +1129,7 @@ func (i *gatewayHandler) ipnsPutHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	// parse the path
+	i.addUserHeaders(w)
 
 	rootCid, newPath, err := parseIpfsPath(r.URL.Path)
 	if err != nil {
@@ -1143,7 +1146,6 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		// Success
-		i.addUserHeaders(w)
 		w.Header().Set("IPFS-Hash", getV1(rootCid).String())
 		return
 	}
@@ -1176,7 +1178,6 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("IPFS-Hash", cidStr)
 	// note: StatusCreated is technically correct here as we created a new resource.
 	http.Redirect(w, r, "ipfs:/"+gopath.Join("/"+cidStr, gopath.Dir(newPath)), http.StatusCreated)
@@ -1252,6 +1253,8 @@ func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	i.addUserHeaders(w)
+
 	has, err := i.keystore.Has(keyName)
 	if err != nil {
 		internalWebError(w, err)
@@ -1305,8 +1308,6 @@ func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request
 		webError(w, "WritableGateway: failed to delete key", err, http.StatusInternalServerError)
 		return
 	}
-
-	i.addUserHeaders(w)
 }
 
 func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -1314,6 +1315,8 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+
+	i.addUserHeaders(w)
 
 	if ipnsPath == "" || ipnsPath == "/" {
 		http.Error(w, "WritableGateway: empty path", http.StatusBadRequest)
@@ -1377,7 +1380,6 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), gopath.Dir(ipnsPath)))
 }
 
@@ -1386,6 +1388,8 @@ func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	i.addUserHeaders(w)
 
 	sk, err := i.keystore.Get(keyName)
 	if errors.Is(err, keystore.ErrNoSuchKey) {
@@ -1417,7 +1421,6 @@ func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
 	if len(ipnsPath) > 0 {
 		redirLoc = "ipns://" + keyEnc.FormatID(keyID) + "/" + ipnsPath
 	}
-	i.addUserHeaders(w)
 	http.Redirect(w, r, redirLoc, http.StatusFound)
 }
 
@@ -1426,6 +1429,8 @@ func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+
+	i.addUserHeaders(w)
 
 	has, err := i.keystore.Has(keyName)
 	if err != nil {
@@ -1461,7 +1466,6 @@ func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) 
 		internalWebError(w, err)
 		return
 	}
-	i.addUserHeaders(w)
 	http.Redirect(w, r, "ipns://"+keyEnc.FormatID(keyID), http.StatusCreated)
 }
 
@@ -1471,6 +1475,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+
+	i.addUserHeaders(w)
 
 	// Verify body is a valid /ipfs/ path
 
@@ -1599,7 +1605,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
 }
 
