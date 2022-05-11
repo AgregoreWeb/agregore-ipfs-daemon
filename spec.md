@@ -190,7 +190,7 @@ Update all or part of the content behind an IPNS name. The new content is pinned
 A valid IPFS path in the format `/ipfs/<CID>[/<path>]` A naked CID is also valid.
 
 #### Response
-A 301 Temporary Redirect to `ipns://<key>[/<path>]`. The header `X-IPNS-Path` is set to the `/ipns/<key>[/<path>]`.
+200 OK if everything went well. The header `X-IPNS-Path` is set to the `/ipns/<key>[/<path>]`.
 
 ### PUT `/ipns/<key>[/<path>]`
 
@@ -201,7 +201,7 @@ The same as POST `/ipns/<key>[/<path>]`, but where the response body is the file
 Remove content behind an IPNS name. The new content is pinned, and the previous content is unpinned.
 
 #### Response
-A 301 Temporary Redirect to `ipns://<key>[/<path>]`. The path in the redirect is the directory containing the deletion path. So if the path in the URL was `/ipns/<key>/path/to/file.ext`, the redirect will be to `ipns://<key>/path/to`.
+200 OK if everything went well.
 
 The header `X-IPNS-Path` is set to `/ipns/<key>[/<path>]`, with the same path logic as above.
 
@@ -209,7 +209,7 @@ The header `X-IPNS-Path` is set to `/ipns/<key>[/<path>]`, with the same path lo
 
 ### GET `/ipns/localhost[/<path>]`
 
-Does a 301 temporary redirect to the actual key address, for example `ipns://k2k4r8lm5pakezcj5cvqpik57twe4ds2sxikeue09ju6se765uvk9ilp`. If a path is included, that will be included in the redirect as well. If a key with that name doesn't exist, 404 will be returned.
+Does a 302 Found redirect to the actual key address, for example `ipns://k2k4r8lm5pakezcj5cvqpik57twe4ds2sxikeue09ju6se765uvk9ilp`. If a path is included, that will be included in the redirect as well. If a key with that name doesn't exist, 404 will be returned.
 
 #### Query params
 - `key=some_name`: **Required**. This specifies the key you want by name

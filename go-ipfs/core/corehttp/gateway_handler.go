@@ -1379,7 +1379,6 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), gopath.Dir(ipnsPath)))
-	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), gopath.Dir(ipnsPath)), http.StatusTemporaryRedirect)
 }
 
 func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -1419,7 +1418,7 @@ func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
 		redirLoc = "ipns://" + keyEnc.FormatID(keyID) + "/" + ipnsPath
 	}
 	i.addUserHeaders(w)
-	http.Redirect(w, r, redirLoc, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, redirLoc, http.StatusFound)
 }
 
 func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -1602,7 +1601,6 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPNS-Path", gopath.Join("/ipns/", ipnsEntry.Name(), ipnsPath))
-	http.Redirect(w, r, "ipns://"+gopath.Join(ipnsEntry.Name(), ipnsPath), http.StatusTemporaryRedirect)
 }
 
 func (i *gatewayHandler) addUserHeaders(w http.ResponseWriter) {
