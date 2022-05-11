@@ -212,21 +212,21 @@ The header `X-IPNS-Path` is set to `/ipns/<key>[/<path>]`, with the same path lo
 Does a 301 temporary redirect to the actual key address, for example `ipns://k2k4r8lm5pakezcj5cvqpik57twe4ds2sxikeue09ju6se765uvk9ilp`. If a path is included, that will be included in the redirect as well. If a key with that name doesn't exist, 404 will be returned.
 
 #### Query params
-- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
+- `key=some_name`: **Required**. This specifies the key you want by name
 
 ### POST `/ipns/localhost`
 
 Creates a key with the provided name, and does a 201 Created redirect to the key URL (`ipns://...`). If a key with that name already exists, it will return the same redirect with no issues.
 
 #### Query params
-- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
+- `key=some_name`: **Required**. This specifies the key you want by name
 
 ### DELETE `/ipns/localhost`
 
 This will delete the key with the provided name from the keystore, and unpin the data it points to.
 
 #### Query params
-- `key=some_name`: **Required**. This specifies the key you want by a name instead of by public key. If a key with this name doesn't exist, it will be created.
+- `key=some_name`: **Required**. This specifies the key you want by name
 
 ## PubSub API
 
@@ -245,8 +245,7 @@ If the `Accept` header is set to `text/event-stream`, the response is an [event 
 {
   "id": "ExampleIDHere", // Prettified node ID of this node
   "topic": "example",    // name of pubsub topic
-  "subscribed": false,   // whether the node is already subscribed
-                         // to the topic or not
+  "subscribed": false,   // whether the node is already subscribed to the topic or not
 }
 ```
 
