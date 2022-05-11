@@ -132,7 +132,7 @@ Upload file(s) to IPFS.
 - `X-IPFS-Pin` pin the uploaded file(s) if this header is present
 
 #### Response
-The response body is uploaded, and a 201 Created redirect to `ipfs://<CID>` is returned. The response header `IPFS-Hash` is set to the CID of the uploaded content.
+The response body is uploaded, and a 201 Created status code is returned, with the `Location` header set to `ipfs://<CID>`. The response header `IPFS-Hash` is set to the CID of the uploaded content.
 
 Form data is supported, in which case multiple files could be uploaded, and the returned CID would point to a directory containing those files.
 
@@ -146,7 +146,7 @@ This can also be used to wrap a file in a directory, by using the empty director
 - `X-IPFS-Pin` pin the resulting new CID if this header is present
 
 #### Response
-A 201 Created redirect to `ipfs://<new root CID>[/<path>]` is returned. The response header `IPFS-Hash` is set to the new root CID that has resulted from the
+A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. The response header `IPFS-Hash` is set to the new root CID that has resulted from the
 file(s) upload.
 
 ### DELETE `/ipfs/<CID>/<path>`
@@ -157,7 +157,7 @@ Remove the file or directory at the provided path.
 - `X-IPFS-Pin` pin the new CID that results from deletion if this header is present
 
 #### Response
-A 201 Created redirect to `ipfs://<new root CID>[/<path>]` is returned. The path in the redirect is the directory containing the deletion path. So if the path in the URL was `/ipfs/<CID>/path/to/file.ext`, the redirect will be to `ipfs://<new CID>/path/to`.
+A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. The path in the redirect is the directory containing the deletion path. So if the path in the URL was `/ipfs/<CID>/path/to/file.ext`, the redirect will be to `ipfs://<new CID>/path/to`.
 
 The response header `IPFS-Hash` is set to the new root CID that has resulted from the deletion.
 
@@ -216,7 +216,7 @@ Does a 302 Found redirect to the actual key address, for example `ipns://k2k4r8l
 
 ### POST `/ipns/localhost`
 
-Creates a key with the provided name, and does a 201 Created redirect to the key URL (`ipns://...`). If a key with that name already exists, it will return the same redirect with no issues.
+Creates a key with the provided name, and returns a 201 Created response, with the `Location` header set to the key URL (`ipns://...`). If a key with that name already exists, it will return the same redirect with no issues.
 
 #### Query params
 - `key=some_name`: **Required**. This specifies the key you want by name
