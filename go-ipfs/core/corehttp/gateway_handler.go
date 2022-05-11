@@ -187,6 +187,8 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			i.pubsubPostHandler(w, r)
 		case http.MethodHead:
 			i.pubsubHeadHandler(w, r)
+		case http.MethodOptions:
+			i.optionsHandler(w, r)
 		default:
 			http.Error(w, "Method "+r.Method+" not allowed", http.StatusMethodNotAllowed)
 		}
@@ -1303,6 +1305,8 @@ func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request
 		webError(w, "WritableGateway: failed to delete key", err, http.StatusInternalServerError)
 		return
 	}
+
+	i.addUserHeaders(w)
 }
 
 func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -1414,6 +1418,7 @@ func (i *gatewayHandler) keyGetHandler(w http.ResponseWriter, r *http.Request) {
 	if len(ipnsPath) > 0 {
 		redirLoc = "ipns://" + keyEnc.FormatID(keyID) + "/" + ipnsPath
 	}
+	i.addUserHeaders(w)
 	http.Redirect(w, r, redirLoc, http.StatusTemporaryRedirect)
 }
 
@@ -1457,6 +1462,7 @@ func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) 
 		internalWebError(w, err)
 		return
 	}
+	i.addUserHeaders(w)
 	http.Redirect(w, r, "ipns://"+keyEnc.FormatID(keyID), http.StatusCreated)
 }
 
