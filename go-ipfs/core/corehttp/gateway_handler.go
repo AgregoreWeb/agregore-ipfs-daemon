@@ -960,9 +960,9 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	shouldPin := r.Header.Get(pinHeader) != ""
+	isDir := mpr != nil
 
 	var cidStr string
-
 	if mpr == nil {
 		// Add just a single file
 		p, err := i.api.Unixfs().Add(
@@ -1001,8 +1001,13 @@ func (i *gatewayHandler) ipfsPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	createdPath := "ipfs://" + cidStr
+	if isDir {
+		createdPath += "/"
+	}
 	w.Header().Set("IPFS-Hash", cidStr)
-	http.Redirect(w, r, "ipfs://"+cidStr, http.StatusCreated)
+	w.Header().Set("Location", createdPath)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) {
@@ -1028,9 +1033,9 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	shouldPin := r.Header.Get(pinHeader) != ""
+	isDir := mpr != nil
 
 	var newCid cid.Cid
-
 	if mpr == nil {
 		// Add just a single file to the directory
 
@@ -1072,8 +1077,13 @@ func (i *gatewayHandler) ipfsPutHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	createdPath := "ipfs:/" + gopath.Join("/", cidStr, newPath)
+	if isDir {
+		createdPath += "/"
+	}
 	w.Header().Set("IPFS-Hash", cidStr)
-	http.Redirect(w, r, "ipfs:/"+gopath.Join("/", cidStr, newPath), http.StatusCreated)
+	w.Header().Set("Location", createdPath)
+	w.WriteHeader(http.StatusCreated)
 }
 
 type stringsCloser struct {
@@ -1179,8 +1189,9 @@ func (i *gatewayHandler) ipfsDeleteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("IPFS-Hash", cidStr)
+	w.Header().Set("Location", "ipfs:/"+gopath.Join("/"+cidStr, gopath.Dir(newPath))+"/")
 	// note: StatusCreated is technically correct here as we created a new resource.
-	http.Redirect(w, r, "ipfs:/"+gopath.Join("/"+cidStr, gopath.Dir(newPath)), http.StatusCreated)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func decodeIpnsPath(w http.ResponseWriter, r *http.Request) (
@@ -1466,7 +1477,9 @@ func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) 
 		internalWebError(w, err)
 		return
 	}
-	http.Redirect(w, r, "ipns://"+keyEnc.FormatID(keyID), http.StatusCreated)
+
+	w.Header().Set("Location", "ipns://"+keyEnc.FormatID(keyID))
+	w.WriteHeader(http.StatusCreated)
 }
 
 // ipnsPostHandler takes an /ipfs/ path in the body and updates the /ipns/ path in URL
@@ -1506,6 +1519,10 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	keys, err := i.api.Key().List(r.Context())
+	if err != nil {
+		webError(w, "failed to retrieve list of keys", err, http.StatusInternalServerError)
+		return
+	}
 	for _, key := range keys {
 		if keyEnc.FormatID(key.ID()) == keyFromPath {
 			ourKey = true

@@ -134,7 +134,7 @@ Upload file(s) to IPFS.
 #### Response
 The response body is uploaded, and a 201 Created status code is returned, with the `Location` header set to `ipfs://<CID>`. The response header `IPFS-Hash` is set to the CID of the uploaded content.
 
-Form data is supported, in which case multiple files could be uploaded, and the returned CID would point to a directory containing those files.
+Form data is supported, in which case multiple files could be uploaded, and the returned CID would point to a directory containing those files. In this case the URL in the `Location` header would end with a `/` to indicate it's a directory.
 
 ### PUT `/ipfs/<CID>[/<path>]`
 
@@ -146,7 +146,9 @@ This can also be used to wrap a file in a directory, by using the empty director
 - `X-IPFS-Pin` pin the resulting new CID if this header is present
 
 #### Response
-A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. The response header `IPFS-Hash` is set to the new root CID that has resulted from the
+A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. It ends with a `/` if form data was uploaded, which means the path is a directory.
+
+The response header `IPFS-Hash` is set to the new root CID that has resulted from the
 file(s) upload.
 
 ### DELETE `/ipfs/<CID>/<path>`
@@ -157,7 +159,7 @@ Remove the file or directory at the provided path.
 - `X-IPFS-Pin` pin the new CID that results from deletion if this header is present
 
 #### Response
-A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. The path in the redirect is the directory containing the deletion path. So if the path in the URL was `/ipfs/<CID>/path/to/file.ext`, the redirect will be to `ipfs://<new CID>/path/to`.
+A 201 Created response with the `Location` header set to `ipfs://<new root CID>[/<path>]` is returned. The path in the header is the directory containing the deletion path. So if the path in the URL was `/ipfs/<CID>/path/to/file.ext`, the header URL will be to `ipfs://<new CID>/path/to/`. Note the ending slash, because the path is a directory.
 
 The response header `IPFS-Hash` is set to the new root CID that has resulted from the deletion.
 
