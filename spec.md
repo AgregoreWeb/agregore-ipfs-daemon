@@ -189,7 +189,7 @@ The header `X-IPFS-Path` is set to the URL path. `IPFS-Hash` is set to CID of th
 Update all or part of the content behind an IPNS name. The new content is pinned, and the previous content is unpinned if it exists.
 
 #### Request Body
-A valid IPFS path in the format `/ipfs/<CID>[/<path>]` A naked CID is also valid.
+A valid IPFS path in the format `/ipfs/<CID>[/<path>]`. A naked CID is also valid, and so is starting with `ipfs://` instead of `/ipfs/`.
 
 #### Response
 200 OK if everything went well. The header `X-IPNS-Path` is set to the `/ipns/<key>[/<path>]`.
