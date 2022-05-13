@@ -140,6 +140,12 @@ func newGatewayHandler(c GatewayConfig, api coreiface.CoreAPI, keystore keystore
 }
 
 func parseIpfsPath(p string) (cid.Cid, string, error) {
+	if strings.HasPrefix(p, "ipfs://") {
+		// IPFS libs don't parse this, because it's URL and not a path
+		// Make it a path
+		p = "/ipfs/" + p[len("ipfs://"):]
+	}
+
 	rootPath, err := path.ParsePath(p)
 	if err != nil {
 		return cid.Cid{}, "", err
