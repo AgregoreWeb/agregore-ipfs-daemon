@@ -218,7 +218,7 @@ Does a 302 Found redirect to the actual key address, for example `ipns://k2k4r8l
 
 ### POST `/ipns/localhost`
 
-Creates a key with the provided name, and returns a 201 Created response, with the `Location` header set to the key URL (`ipns://...`). If a key with that name already exists, it will return the same redirect with no issues.
+Creates a key with the provided name, and returns a 201 Created response, with the `Location` header set to the key URL, with ending slash: `ipns://.../`. If a key with that name already exists, it will return the same redirect with no issues.
 
 #### Query params
 - `key=some_name`: **Required**. This specifies the key you want by name

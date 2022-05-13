@@ -1503,7 +1503,7 @@ func (i *gatewayHandler) keyPostHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	w.Header().Set("Location", "ipns://"+keyEnc.FormatID(keyID))
+	w.Header().Set("Location", "ipns://"+keyEnc.FormatID(keyID)+"/")
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -1595,7 +1595,7 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		golog.Println("name publish time", time.Since(start))
+		golog.Println("name publish time (root)", time.Since(start))
 
 		newCid = inCid
 	} else {
@@ -1618,6 +1618,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 
 		// Publish new path
 
+		start = time.Now()
+
 		ipnsEntry, err = i.api.Name().Publish(
 			r.Context(), ipath.IpfsPath(newCid),
 			options.Name.AllowOffline(true), options.Name.Key(keyFromPath),
@@ -1626,6 +1628,8 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 			webError(w, "WritableGateway: failed to publish path", err, http.StatusInternalServerError)
 			return
 		}
+
+		golog.Println("name publish time (non-root)", time.Since(start))
 	}
 
 	// Successfully published new path
