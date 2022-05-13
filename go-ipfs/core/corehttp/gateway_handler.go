@@ -1393,12 +1393,20 @@ func (i *gatewayHandler) ipnsDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !getV1(resolvedCid).Equals(emptyDirCid) {
-		// There was something previously there to unpin
-		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+		_, isPinned, err := i.api.Pin().IsPinned(r.Context(), ipath.IpfsPath(resolvedCid))
 		if err != nil {
-			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+			webError(w, "WritableGateway: error determining if old content is pinned", err,
 				http.StatusInternalServerError)
 			return
+		}
+		if isPinned {
+			// There was something previously there to unpin
+			err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+			if err != nil {
+				webError(w, "WritableGateway: name published but failed to unpin old content", err,
+					http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -1624,12 +1632,20 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !getV1(resolvedCid).Equals(emptyDirCid) {
-		// There was something previously there to unpin
-		err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+		_, isPinned, err := i.api.Pin().IsPinned(r.Context(), ipath.IpfsPath(resolvedCid))
 		if err != nil {
-			webError(w, "WritableGateway: name published but failed to unpin new content", err,
+			webError(w, "WritableGateway: error determining if old content is pinned", err,
 				http.StatusInternalServerError)
 			return
+		}
+		if isPinned {
+			// There was something previously there to unpin
+			err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
+			if err != nil {
+				webError(w, "WritableGateway: name published but failed to unpin old content", err,
+					http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
