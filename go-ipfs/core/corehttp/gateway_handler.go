@@ -1524,6 +1524,11 @@ func (i *gatewayHandler) ipnsPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	bodyPath := string(buf)
+	if strings.HasPrefix(bodyPath, "ipfs://") {
+		// IPFS libs don't parse this, because it's URL and not a path
+		// Make it a path
+		bodyPath = "/ipfs/" + bodyPath[len("ipfs://"):]
+	}
 	inCid, _, err := parseIpfsPath(bodyPath)
 	if err != nil {
 		webError(w, "WritableGateway: failed to parse the path", err, http.StatusBadRequest)
