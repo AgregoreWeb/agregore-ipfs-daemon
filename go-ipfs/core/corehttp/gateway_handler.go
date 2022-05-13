@@ -1298,11 +1298,29 @@ func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request
 	keyStr := keyEnc.FormatID(pid)
 
 	// Get current IPFS path and CID
-	resolvedPath, err := i.api.Name().Resolve(r.Context(), "/ipns/"+keyStr)
-	if err != nil {
-		webError(w, "WritableGateway: failed to resolve name", err, http.StatusInternalServerError)
+
+	// This is our key so it should resolve instantly
+	// If it doesn't that likely means that the key never pointed to anything
+	// and unpinning can be skipped.
+	// Set a short context to make resolution give up if it doesn't happen right away
+	resolveCtx, _ := context.WithTimeout(r.Context(), 1*time.Second)
+
+	resolvedPath, err := i.api.Name().Resolve(resolveCtx, "/ipns/"+keyStr)
+
+	// Whether it errored or not, delete the key now
+	err2 := i.keystore.Delete(keyName)
+	if err2 != nil {
+		webError(w, "WritableGateway: failed to delete key", err, http.StatusInternalServerError)
 		return
 	}
+
+	if err != nil {
+		// Error resolving key
+		// Most likely key never pointed to anything, not a real error
+		// Skip unpinning
+		return
+	}
+
 	resolvedCidStr := strings.Split(resolvedPath.String(), "/")[2]
 	resolvedCid := cidMustDecode(resolvedCidStr)
 
@@ -1310,13 +1328,6 @@ func (i *gatewayHandler) keyDeleteHandler(w http.ResponseWriter, r *http.Request
 	err = i.api.Pin().Rm(r.Context(), ipath.IpfsPath(resolvedCid))
 	if err != nil {
 		webError(w, "WritableGateway: failed to unpin new content", err, http.StatusInternalServerError)
-		return
-	}
-
-	// Delete key
-	err = i.keystore.Delete(keyName)
-	if err != nil {
-		webError(w, "WritableGateway: failed to delete key", err, http.StatusInternalServerError)
 		return
 	}
 }
