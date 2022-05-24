@@ -382,7 +382,7 @@ func (i *gatewayHandler) getOrHeadHandler(w http.ResponseWriter, r *http.Request
 	// we need to figure out whether this is a directory before doing most of the heavy lifting below
 	_, ok := dr.(files.Directory)
 	// Also if it's a JSON or HTML directory listing
-	jsonListing := r.Header.Get("Accept") == "application/json"
+	jsonListing := r.Header.Get("Accept") == "application/json" || r.Header.Get("Accept") == ""
 
 	if ok {
 		if jsonListing {

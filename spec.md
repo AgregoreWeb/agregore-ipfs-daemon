@@ -101,6 +101,7 @@ Download IPFS data.
 
 #### Headers
 - `Accept: application/json` return a JSON directory listing for directories
+  - No `Accept` header also returns JSON. HTML is returned if `Accept` has any other value.
 
 #### Query params
 - `noResolve` return a directory listing for a directory even if it contains an `index.html` file
